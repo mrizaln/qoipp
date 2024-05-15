@@ -12,7 +12,7 @@ target_compile_features(qoipp PUBLIC cxx_std_20)
 set_target_properties(qoipp PROPERTIES CXX_EXTENSIONS OFF)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(qoipp PRIVATE -march=native -mtune=native -fno-rtti)
+  target_compile_options(qoipp PRIVATE -march=native -mtune=native)
 endif()
 
 # build qoiconv only when qoipp is built directly not as a subproject

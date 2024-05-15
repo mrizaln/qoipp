@@ -13,14 +13,27 @@ find_package(fmt REQUIRED)
 find_package(ut REQUIRED)
 find_package(stb REQUIRED)
 
+include(cmake/fetched-lib.cmake) # emits qoi target
+
 # The library
 add_subdirectory(lib/qoipp)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_compile_definitions(qoipp PRIVATE QOIPP_DEBUG)
+endif()
 
-add_executable(main source/main.cpp)
-target_include_directories(main PRIVATE source)
-target_link_libraries(main PRIVATE fmt::fmt Boost::ut stb::stb qoipp)
-target_compile_options(main PRIVATE -Wall -Wextra -Wconversion -Wswitch-enum)
+enable_testing()
 
-# sanitizer
-target_compile_options(main PRIVATE -fsanitize=address,leak,undefined)
-target_link_options(main PRIVATE -fsanitize=address,leak,undefined)
+add_executable(qoipp_test qoipp_test.cpp)
+target_link_libraries(qoipp_test PRIVATE fmt::fmt Boost::ut stb::stb qoipp qoi)
+target_compile_options(qoipp_test PRIVATE -Wall -Wextra -Wconversion)
+target_compile_options(qoipp_test PRIVATE -fsanitize=address,leak,undefined)
+target_link_options(qoipp_test PRIVATE -fsanitize=address,leak,undefined)
+
+add_test(NAME qoipp_test COMMAND $<TARGET_FILE:qoipp_test>)
+add_custom_command(
+  TARGET qoipp_test
+  POST_BUILD
+  COMMAND qoipp_test)
+
+# # sanitizer
+# ~~~
