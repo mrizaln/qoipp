@@ -354,11 +354,7 @@ namespace qoipp::impl
     using RunningArray = std::array<Pixel, constants::runningArraySize>;
 
     template <Channels Chan>
-    QOIPP_ALWAYS_INLINE void getPixel(
-        std::span<const Byte> data,
-        Pixel&                pixel,
-        usize                 index
-    ) noexcept
+    QOIPP_ALWAYS_INLINE inline void getPixel(std::span<const Byte> data, Pixel& pixel, usize index) noexcept
     {
         const usize dataIndex = index * static_cast<u32>(Chan);
 
@@ -370,7 +366,7 @@ namespace qoipp::impl
         }
     }
 
-    QOIPP_ALWAYS_INLINE usize hash(const Pixel& pixel)
+    QOIPP_ALWAYS_INLINE inline usize hash(const Pixel& pixel)
     {
         const auto& [r, g, b, a] = pixel;
         return (r * 3 + g * 5 + b * 7 + a * 11);
@@ -487,39 +483,39 @@ namespace qoipp
     std::vector<Byte> encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto maxSize = static_cast<usize>(width * height * channels);
+        const auto maxSize                               = static_cast<usize>(width * height * channels);
 
         if (width <= 0 || height <= 0 || channels <= 0) {
-            throw std::invalid_argument(std::format(
-                "Invalid image description: w = {}, h = {}, c = {}", width, height, channels
-            ));
+            throw std::invalid_argument{
+                std::format("Invalid image description: w = {}, h = {}, c = {}", width, height, channels)
+            };
         }
 
         if (channels != 3 && channels != 4) {
-            throw std::invalid_argument(
+            throw std::invalid_argument{
                 std::format("Invalid number of channels: expected 3 or 4, got {}", channels)
-            );
+            };
         }
 
         if (data.size() != maxSize) {
-            throw std::invalid_argument(std::format(
-                "Data size does not match the image description: expected {}x{}x{} = {}, got {}",
+            throw std::invalid_argument{ std::format(
+                "Data size does not match the image description: expected {} x {} x {} = {}, got {}",
                 width,
                 height,
                 channels,
                 maxSize,
                 data.size()
-            ));
+            ) };
         }
 
         if (channels == 3 && data.size() % 3 != 0) {
-            throw std::invalid_argument(
+            throw std::invalid_argument{
                 "Data does not align with the number of channels: expected multiple of 3 bytes"
-            );
+            };
         } else if (channels == 4 && data.size() % 4 != 0) {
-            throw std::invalid_argument(
+            throw std::invalid_argument{
                 "Data does not align with the number of channels: expected multiple of 4 bytes"
-            );
+            };
         }
 
         bool isSrgb = colorspace == ColorSpace::sRGB;
