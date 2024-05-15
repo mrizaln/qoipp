@@ -9,7 +9,10 @@ namespace qoipp
 {
     using ByteVec  = std::vector<std::byte>;
     using ByteSpan = std::span<const std::byte>;
-    using CharSpan = std::span<const char>;
+
+    template <typename C>
+    concept CharLike = std::same_as<C, char> or std::same_as<C, unsigned char>
+                    or std::same_as<C, signed char>;
 
     enum class ColorSpace
     {
@@ -24,7 +27,7 @@ namespace qoipp
         int        m_channels;
         ColorSpace m_colorSpace;
 
-        auto operator<=>(const ImageDesc&) const = default;
+        constexpr auto operator<=>(const ImageDesc&) const = default;
     };
 
     struct QoiImage
@@ -39,20 +42,15 @@ namespace qoipp
      * @param data The data to encode
      * @param desc The description of the image
      * @return ByteVec The encoded image
-     * @throw std::runtime_error If the arguments provided are invalid
+     * @throw std::invalid_argument If there is a mismatch between the data and the description
      */
     ByteVec encode(ByteSpan data, ImageDesc desc) noexcept(false);
 
-    inline ByteVec encode(CharSpan data, ImageDesc desc) noexcept(false)
+    template <CharLike Char>
+    inline ByteVec encode(std::span<const Char> data, ImageDesc desc) noexcept(false)
     {
-        // I believe this is safe
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
-        return encode(byteData, std::move(desc));
-    }
-
-    inline ByteVec encode(const char* data, std::size_t size, ImageDesc desc) noexcept(false)
-    {
-        return encode(CharSpan{ data, size }, std::move(desc));
+        return encode(byteData, desc);
     }
 
     /**
@@ -60,20 +58,15 @@ namespace qoipp
      *
      * @param data The QOI image to decode
      * @return QoiImage The decoded image
-     * @throw std::runtime_error If the image is invalid
+     * @throw std::runtime_error If the data is not a valid QOI image
      */
     QoiImage decode(ByteSpan data) noexcept(false);
 
-    inline QoiImage decode(CharSpan data) noexcept(false)
+    template <CharLike Char>
+    inline QoiImage decode(std::span<const Char> data) noexcept(false)
     {
-        // I believe this is safe
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
         return decode(byteData);
-    }
-
-    inline QoiImage decode(const char* data, std::size_t size) noexcept(false)
-    {
-        return decode(CharSpan{ data, size });
     }
 }
 
