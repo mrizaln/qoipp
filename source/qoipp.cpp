@@ -315,6 +315,9 @@ namespace qoipp::impl
         DataChunkArray(usize size)
             : m_bytes(size)
         {
+#ifdef QOIPP_DEBUG
+            std::cout << "DataChunkArray init with size: " << std::dec << size << '\n';
+#endif
         }
 
 #ifdef QOIPP_DEBUG
@@ -334,6 +337,12 @@ namespace qoipp::impl
             m_opCount[typeid(T).name()]++;
 #endif
             t.write(m_bytes, m_index);
+
+#ifdef QOIPP_DEBUG
+            if (m_index > m_bytes.size()) {
+                throw std::runtime_error{ "Out of bound write" };
+            }
+#endif
         }
 
         ByteVec get() noexcept
@@ -375,9 +384,8 @@ namespace qoipp::impl
     template <Channels Chan>
     ByteVec encode(std::span<const Byte> data, u32 width, u32 height, bool srgb)
     {
-
-        const usize maxSize = width * height * static_cast<usize>(Chan)    //
-                            + constants::headerSize                        //
+        // worst possible scenario is when no data is compressed + header + endMarker + tag (rgb/rgba)
+        const usize maxSize = width * height * (static_cast<usize>(Chan) + 1) + constants::headerSize
                             + constants::endMarker.size();
 
         DataChunkArray chunks{ maxSize };    // the encoded data
