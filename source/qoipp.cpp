@@ -1,9 +1,9 @@
 #include "qoipp.hpp"
 
 #include <array>
-#include <bit>
 #include <concepts>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <ranges>
 #include <span>
@@ -99,13 +99,7 @@ namespace qoipp
         RGBA = 4,
     };
 
-    template <Channels>
     struct Pixel
-    {
-    };
-
-    template <>
-    struct Pixel<Channels::RGBA>
     {
         u8 m_r;
         u8 m_g;
@@ -114,41 +108,13 @@ namespace qoipp
 
         constexpr auto operator<=>(const Pixel&) const = default;
     };
-
-    template <>
-    struct Pixel<Channels::RGB>
-    {
-        u8 m_r;
-        u8 m_g;
-        u8 m_b;
-
-        constexpr auto operator<=>(const Pixel&) const noexcept = default;
-    };
 }
 
 namespace qoipp::constants
 {
-    template <Channels>
-    struct StartPixel;
-
-    template <>
-    struct StartPixel<Channels::RGB>
-    {
-        constexpr static Pixel<Channels::RGB> value = { 0x00, 0x00, 0x00 };
-    };
-
-    template <>
-    struct StartPixel<Channels::RGBA>
-    {
-        constexpr static Pixel<Channels::RGBA> value = { 0x00, 0x00, 0x00, 0xFF };
-    };
-
     constexpr usize      headerSize       = 14;
     constexpr usize      runningArraySize = 64;
     constexpr ByteArr<8> endMarker        = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
-
-    template <Channels Chan>
-    static constexpr Pixel<Chan> start = StartPixel<Chan>::value;
 
     constexpr i8 biasOpRun    = -1;
     constexpr i8 biasOpDiff   = 2;
@@ -161,6 +127,8 @@ namespace qoipp::constants
     constexpr i8 maxLumaG     = 31;
     constexpr i8 minLumaRB    = -8;
     constexpr i8 maxLumaRB    = 7;
+
+    constexpr Pixel start = { 0x00, 0x00, 0x00, 0xFF };
 }
 
 namespace qoipp::data
@@ -383,159 +351,143 @@ namespace qoipp::impl
 #endif
     };
 
-    template <Channels Chan>
-    using RunningArray = std::array<Pixel<Chan>, constants::runningArraySize>;
+    using RunningArray = std::array<Pixel, constants::runningArraySize>;
 
     template <Channels Chan>
-    class Encoder
+    QOIPP_ALWAYS_INLINE void getPixel(
+        std::span<const Byte> data,
+        Pixel&                pixel,
+        usize                 index
+    ) noexcept
     {
-    public:
-        Encoder(std::span<const Byte> data)
-            : m_data{ data }
-        {
+        const usize dataIndex = index * static_cast<u32>(Chan);
+
+        if constexpr (Chan == Channels::RGB) {
+            std::memcpy(&pixel, data.data() + dataIndex, 3);
+            pixel.m_a = 0xFF;
+        } else {
+            std::memcpy(&pixel, data.data() + dataIndex, 4);
         }
+    }
 
-        ByteVec encode(u32 width, u32 height)
-        {
-            const usize maxSize = width * height * static_cast<usize>(Chan)    //
-                                + constants::headerSize                        //
-                                + constants::endMarker.size();
+    QOIPP_ALWAYS_INLINE usize hash(const Pixel& pixel)
+    {
+        const auto& [r, g, b, a] = pixel;
+        return (r * 3 + g * 5 + b * 7 + a * 11);
+    }
 
-            DataChunkArray chunks{ maxSize };    // the encoded data
+    template <Channels Chan>
+    ByteVec encode(std::span<const Byte> data, u32 width, u32 height, bool srgb)
+    {
 
-            // TODO: correct colorspace field
-            chunks.push(data::QoiHeader{
-                .m_width      = static_cast<u32>(width),
-                .m_height     = static_cast<u32>(height),
-                .m_channels   = static_cast<u8>(Chan),
-                .m_colorspace = 0,    // 0: sRGB with linear alpha, 1: all channels linear
-                                      // TBH, I don't know what this means
-            });
+        const usize maxSize = width * height * static_cast<usize>(Chan)    //
+                            + constants::headerSize                        //
+                            + constants::endMarker.size();
 
-            auto previousPixel = constants::start<Chan>;
-            i32  lastRun       = 0;
+        DataChunkArray chunks{ maxSize };    // the encoded data
+        RunningArray   seenPixels = {};
 
-            for (const auto idx : sv::iota(0u, static_cast<usize>(width * height))) {
-                const auto& currentPixel = getPixel(idx);
+        // TODO: correct colorspace field
+        chunks.push(data::QoiHeader{
+            .m_width      = static_cast<u32>(width),
+            .m_height     = static_cast<u32>(height),
+            .m_channels   = static_cast<u8>(Chan),
+            .m_colorspace = static_cast<u8>(srgb ? 0 : 1),
+        });
 
-                if (previousPixel == currentPixel) {
-                    lastRun++;
+        auto prevPixel = constants::start;
+        auto currPixel = constants::start;
+        i32  run       = 0;
 
-                    const bool runLimit  = lastRun == constants::runLimit;
-                    const bool lastPixel = idx == static_cast<usize>(width * height) - 1;
-                    if (runLimit || lastPixel) {
-                        chunks.push(data::op::Run{ .m_run = static_cast<i8>(lastRun) });
-                        lastRun = 0;
-                    }
+        for (const auto pixelIndex : sv::iota(0u, static_cast<usize>(width * height))) {
+            getPixel<Chan>(data, currPixel, pixelIndex);
 
-                    previousPixel = currentPixel;
-                    continue;
-                } else {
-                    if (lastRun > 0) {
-                        // ends of OP_RUN
-                        chunks.push(data::op::Run{ .m_run = static_cast<i8>(lastRun) });
-                        lastRun = 0;
-                    }
+            if (prevPixel == currPixel) {
+                run++;
 
-                    const u8 index = hash(currentPixel) % constants::runningArraySize;
-
-                    // OP_INDEX
-                    if (m_runningArray[index] == currentPixel) {
-                        chunks.push(data::op::Index{ .m_index = index });
-                    } else {
-                        m_runningArray[index] = currentPixel;
-                        const auto sameAlpha  = [&] {
-                            if constexpr (Chan == Channels::RGB) {
-                                return true;
-                            } else {
-                                return previousPixel.m_a == currentPixel.m_a;
-                            }
-                        }();
-
-                        // OP_DIFF and OP_LUMA
-                        if (sameAlpha) {
-                            const i8 dr = currentPixel.m_r - previousPixel.m_r;
-                            const i8 dg = currentPixel.m_g - previousPixel.m_g;
-                            const i8 db = currentPixel.m_b - previousPixel.m_b;
-
-                            const i8 dr_dg = dr - dg;
-                            const i8 db_dg = db - dg;
-
-                            if (data::op::shouldDiff(dr, dg, db)) {
-                                chunks.push(data::op::Diff{
-                                    .m_dr = dr,
-                                    .m_dg = dg,
-                                    .m_db = db,
-                                });
-                            } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
-                                chunks.push(data::op::Luma{
-                                    .m_dg    = dg,
-                                    .m_dr_dg = dr_dg,
-                                    .m_db_dg = db_dg,
-                                });
-                            } else {
-                                // OP_RGB
-                                chunks.push(data::op::Rgb{
-                                    .m_r = currentPixel.m_r,
-                                    .m_g = currentPixel.m_g,
-                                    .m_b = currentPixel.m_b,
-                                });
-                            }
-                        } else if constexpr (Chan == Channels::RGBA) {
-                            // OP_RGBA
-                            chunks.push(data::op::Rgba{
-                                .m_r = currentPixel.m_r,
-                                .m_g = currentPixel.m_g,
-                                .m_b = currentPixel.m_b,
-                                .m_a = currentPixel.m_a,
-                            });
-                        }
-                    }
+                const bool runLimit  = run == constants::runLimit;
+                const bool lastPixel = pixelIndex == static_cast<usize>(width * height) - 1;
+                if (runLimit || lastPixel) {
+                    chunks.push(data::op::Run{ .m_run = static_cast<i8>(run) });
+                    run = 0;
+                }
+            } else {
+                if (run > 0) {
+                    // ends of OP_RUN
+                    chunks.push(data::op::Run{ .m_run = static_cast<i8>(run) });
+                    run = 0;
                 }
 
-                previousPixel = currentPixel;
+                const u8 index = hash(currPixel) % constants::runningArraySize;
+
+                // OP_INDEX
+                if (seenPixels[index] == currPixel) {
+                    chunks.push(data::op::Index{ .m_index = index });
+                } else {
+                    seenPixels[index] = currPixel;
+
+                    // OP_DIFF and OP_LUMA
+                    if (prevPixel.m_a == currPixel.m_a) {
+                        const i8 dr = currPixel.m_r - prevPixel.m_r;
+                        const i8 dg = currPixel.m_g - prevPixel.m_g;
+                        const i8 db = currPixel.m_b - prevPixel.m_b;
+
+                        const i8 dr_dg = dr - dg;
+                        const i8 db_dg = db - dg;
+
+                        if (data::op::shouldDiff(dr, dg, db)) {
+                            chunks.push(data::op::Diff{
+                                .m_dr = dr,
+                                .m_dg = dg,
+                                .m_db = db,
+                            });
+                        } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
+                            chunks.push(data::op::Luma{
+                                .m_dg    = dg,
+                                .m_dr_dg = dr_dg,
+                                .m_db_dg = db_dg,
+                            });
+                        } else {
+                            // OP_RGB
+                            chunks.push(data::op::Rgb{
+                                .m_r = currPixel.m_r,
+                                .m_g = currPixel.m_g,
+                                .m_b = currPixel.m_b,
+                            });
+                        }
+                    } else if constexpr (Chan == Channels::RGBA) {
+                        // OP_RGBA
+                        chunks.push(data::op::Rgba{
+                            .m_r = currPixel.m_r,
+                            .m_g = currPixel.m_g,
+                            .m_b = currPixel.m_b,
+                            .m_a = currPixel.m_a,
+                        });
+                    }
+                }
             }
 
-            chunks.push(data::EndMarker{});
-
-            return chunks.get();
+            prevPixel = currPixel;
         }
 
-    private:
-        std::span<const Byte>       m_data;
-        std::array<Pixel<Chan>, 64> m_runningArray;
+        chunks.push(data::EndMarker{});
 
-        const Pixel<Chan>& getPixel(usize index)
-        {
-            const usize dataIndex = index * static_cast<u32>(Chan);
-            return reinterpret_cast<const Pixel<Chan>&>(m_data[dataIndex]);
-        }
-
-        usize hash(const Pixel<Chan>& pixel) const
-        {
-            if constexpr (Chan == Channels::RGBA) {
-                const auto& [r, g, b, a] = pixel;
-                return (r * 3 + g * 5 + b * 7 + a * 11);
-            } else {
-                const auto& [r, g, b] = pixel;
-                const u8 a            = constants::start<Channels::RGBA>.m_a;
-                return (r * 3 + g * 5 + b * 7 + a * 11);
-            }
-        }
-    };
-
+        return chunks.get();
+    }
     // TODO: implement
-    class Decoder
+    template <Channels Chan>
+    QoiImage decode(std::span<const Byte> data) noexcept(false)
     {
-    };
+        throw std::runtime_error{ "Not implemented yet" };
+    }
 }
 
 namespace qoipp
 {
     std::vector<Byte> encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
     {
-        const auto [width, height, channels] = desc;
-        const auto maxSize                   = static_cast<usize>(width * height * channels);
+        const auto [width, height, channels, colorspace] = desc;
+        const auto maxSize = static_cast<usize>(width * height * channels);
 
         if (width <= 0 || height <= 0 || channels <= 0) {
             throw std::invalid_argument(std::format(
@@ -560,12 +512,21 @@ namespace qoipp
             ));
         }
 
-        if (desc.m_channels == 3) {
-            impl::Encoder<Channels::RGB> encoder{ data };
-            return encoder.encode(static_cast<u32>(width), static_cast<u32>(height));
+        if (channels == 3 && data.size() % 3 != 0) {
+            throw std::invalid_argument(
+                "Data does not align with the number of channels: expected multiple of 3 bytes"
+            );
+        } else if (channels == 4 && data.size() % 4 != 0) {
+            throw std::invalid_argument(
+                "Data does not align with the number of channels: expected multiple of 4 bytes"
+            );
+        }
+
+        bool isSrgb = colorspace == ColorSpace::sRGB;
+        if (channels == 3) {
+            return impl::encode<Channels::RGB>(data, (u32)width, (u32)height, isSrgb);
         } else {
-            impl::Encoder<Channels::RGBA> encoder{ data };
-            return encoder.encode(static_cast<u32>(width), static_cast<u32>(height));
+            return impl::encode<Channels::RGBA>(data, (u32)width, (u32)height, isSrgb);
         }
     }
 

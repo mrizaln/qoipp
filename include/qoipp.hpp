@@ -11,11 +11,20 @@ namespace qoipp
     using ByteSpan = std::span<const std::byte>;
     using CharSpan = std::span<const char>;
 
+    enum class ColorSpace
+    {
+        sRGB   = 0,
+        Linear = 1,
+    };
+
     struct ImageDesc
     {
-        int m_width;
-        int m_height;
-        int m_channels;
+        int        m_width;
+        int        m_height;
+        int        m_channels;
+        ColorSpace m_colorSpace;
+
+        auto operator<=>(const ImageDesc&) const = default;
     };
 
     struct QoiImage
