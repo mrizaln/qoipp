@@ -1,6 +1,5 @@
 #include "qoipp.hpp"
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -18,7 +17,16 @@
 #    include <iostream>
 #endif
 
-namespace sr = std::ranges;
+#if defined(_MSC_VER)
+#    define QOIPP_ALWAYS_INLINE [[msvc::forceinline]]
+#elif defined(__GNUC__)
+#    define QOIPP_ALWAYS_INLINE [[gnu::always_inline]]
+#elif defined(__clang__)
+#    define QOIPP_ALWAYS_INLINE [[clang::always_inline]]
+#else
+#    define QOIPP_ALWAYS_INLINE
+#endif
+
 namespace sv = std::views;
 
 // utils ana aliases
@@ -64,20 +72,23 @@ namespace qoipp
 
     template <typename T>
         requires std::is_fundamental_v<T>
-    constexpr T toBigEndian(const T& value)
+    constexpr T toBigEndian(const T& value) noexcept
     {
         if constexpr (std::endian::native == std::endian::big) {
             return value;
         } else {
-            auto bytes = std::bit_cast<ByteArr<sizeof(T)>>(value);
-            sr::reverse(bytes);
-            return std::bit_cast<T>(bytes);
+            T result  = 0;
+            result   |= (value & 0x000000FF) << 24;
+            result   |= (value & 0x0000FF00) << 8;
+            result   |= (value & 0x00FF0000) >> 8;
+            result   |= (value & 0xFF000000) >> 24;
+            return result;
         }
     }
 
     template <typename T>
         requires std::is_fundamental_v<T>
-    constexpr T fromBigEndian(const T& value)
+    constexpr T fromBigEndian(const T& value) noexcept
     {
         return toBigEndian(value);
     }
@@ -111,7 +122,7 @@ namespace qoipp
         u8 m_g;
         u8 m_b;
 
-        constexpr auto operator<=>(const Pixel&) const = default;
+        constexpr auto operator<=>(const Pixel&) const noexcept = default;
     };
 }
 
@@ -132,8 +143,9 @@ namespace qoipp::constants
         constexpr static Pixel<Channels::RGBA> value = { 0x00, 0x00, 0x00, 0xFF };
     };
 
-    constexpr usize      headerSize = 14;
-    constexpr ByteArr<8> endMarker  = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
+    constexpr usize      headerSize       = 14;
+    constexpr usize      runningArraySize = 64;
+    constexpr ByteArr<8> endMarker        = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
 
     template <Channels Chan>
     static constexpr Pixel<Chan> start = StartPixel<Chan>::value;
@@ -163,19 +175,12 @@ namespace qoipp::data
     template <typename T>
     concept DataChunkVec = DataChunk<T, ByteVec>;
 
-    template <typename T, usize N>
-        requires(sizeof(T) == 1)
-    constexpr void writeArray(ByteVec& vec, usize& index, const std::array<T, N>& arr) noexcept
+    QOIPP_ALWAYS_INLINE inline void write32(ByteVec& vec, usize& index, u32 value) noexcept
     {
-        for (const auto& value : arr) {
-            vec[index++] = static_cast<Byte>(value);
-        }
-    }
-
-    void write32(ByteVec& vec, usize& index, u32 value) noexcept
-    {
-        auto bytes = std::bit_cast<ByteArr<4>>(toBigEndian(value));
-        writeArray(vec, index, bytes);
+        vec[index++] = static_cast<Byte>((value >> 24) & 0xFF);
+        vec[index++] = static_cast<Byte>((value >> 16) & 0xFF);
+        vec[index++] = static_cast<Byte>((value >> 8) & 0xFF);
+        vec[index++] = static_cast<Byte>(value & 0xFF);
     }
 
     struct QoiHeader
@@ -187,9 +192,12 @@ namespace qoipp::data
         u8  m_channels;
         u8  m_colorspace;
 
-        void write(ByteVec& vec, usize& index) const noexcept
+        QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
         {
-            writeArray(vec, index, m_magic);
+            for (char c : m_magic) {
+                vec[index++] = static_cast<Byte>(c);
+            }
+
             write32(vec, index, m_width);
             write32(vec, index, m_height);
 
@@ -201,9 +209,11 @@ namespace qoipp::data
 
     struct EndMarker
     {
-        static void write(ByteVec& vec, usize& index) noexcept
+        QOIPP_ALWAYS_INLINE static void write(ByteVec& vec, usize& index) noexcept
         {
-            writeArray(vec, index, constants::endMarker);
+            for (auto byte : constants::endMarker) {
+                vec[index++] = byte;
+            }
         }
     };
     static_assert(DataChunkVec<EndMarker>);
@@ -226,7 +236,7 @@ namespace qoipp::data
             u8 m_g = 0;
             u8 m_b = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RGB);
                 vec[index++] = static_cast<Byte>(m_r);
@@ -243,7 +253,7 @@ namespace qoipp::data
             u8 m_b = 0;
             u8 m_a = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RGBA);
                 vec[index++] = static_cast<Byte>(m_r);
@@ -258,7 +268,7 @@ namespace qoipp::data
         {
             u32 m_index = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_INDEX | m_index);
             }
@@ -271,7 +281,7 @@ namespace qoipp::data
             i8 m_dg = 0;
             i8 m_db = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 constexpr auto bias = constants::biasOpDiff;
 
@@ -288,7 +298,7 @@ namespace qoipp::data
             i8 m_dr_dg = 0;
             i8 m_db_dg = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 constexpr auto biasG  = constants::biasOpLumaG;
                 constexpr auto biasRB = constants::biasOpLumaRB;
@@ -303,7 +313,7 @@ namespace qoipp::data
         {
             i8 m_run = 0;
 
-            void write(ByteVec& vec, usize& index) const noexcept
+            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RUN | (m_run + constants::biasOpRun));
             }
@@ -313,14 +323,14 @@ namespace qoipp::data
         template <typename T>
         concept Op = AnyOf<T, Rgb, Rgba, Index, Diff, Luma, Run>;
 
-        bool shouldDiff(i8 dr, i8 dg, i8 db) noexcept
+        QOIPP_ALWAYS_INLINE inline bool shouldDiff(i8 dr, i8 dg, i8 db) noexcept
         {
             return dr >= constants::minDiff && dr <= constants::maxDiff    //
                 && dg >= constants::minDiff && dg <= constants::maxDiff    //
                 && db >= constants::minDiff && db <= constants::maxDiff;
         }
 
-        bool shouldLuma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
+        QOIPP_ALWAYS_INLINE inline bool shouldLuma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
         {
             return dr_dg >= constants::minLumaRB && dr_dg <= constants::maxLumaRB    //
                 && db_dg >= constants::minLumaRB && db_dg <= constants::maxLumaRB    //
@@ -350,8 +360,7 @@ namespace qoipp::impl
 #endif
         template <typename T>
             requires(data::op::Op<T> or AnyOf<T, data::QoiHeader, data::EndMarker>)
-        [[gnu::always_inline]]
-        void push(T&& t)
+        QOIPP_ALWAYS_INLINE void push(T&& t) noexcept
         {
 #ifdef QOIPP_DEBUG
             m_opCount[typeid(T).name()]++;
@@ -359,7 +368,7 @@ namespace qoipp::impl
             t.write(m_bytes, m_index);
         }
 
-        ByteVec get()
+        ByteVec get() noexcept
         {
             m_bytes.resize(m_index);
             return std::exchange(m_bytes, {});
@@ -375,37 +384,7 @@ namespace qoipp::impl
     };
 
     template <Channels Chan>
-    class RunningArray
-    {
-    public:
-        constexpr static usize s_size = 64;
-
-        // returns index if color match on the same index
-        std::optional<usize> put(const Pixel<Chan>& pixel)
-        {
-            const usize index = [&] {
-                if constexpr (Chan == Channels::RGBA) {
-                    const auto& [r, g, b, a] = pixel;
-                    return (r * 3 + g * 5 + b * 7 + a * 11) % s_size;
-                } else {
-                    const auto& [r, g, b] = pixel;
-                    constexpr auto a      = constants::start<Channels::RGBA>.m_a;
-                    return (r * 3 + g * 5 + b * 7 + a * 11) % s_size;
-                }
-            }();
-
-            auto& oldPixel = m_data[index];
-            if (oldPixel == pixel) {
-                return index;
-            } else {
-                oldPixel = pixel;
-                return std::nullopt;
-            }
-        }
-
-    private:
-        std::array<Pixel<Chan>, s_size> m_data = {};
-    };
+    using RunningArray = std::array<Pixel<Chan>, constants::runningArraySize>;
 
     template <Channels Chan>
     class Encoder
@@ -451,67 +430,67 @@ namespace qoipp::impl
 
                     previousPixel = currentPixel;
                     continue;
-                } else if (lastRun > 0) {
-                    // ends of OP_RUN
-                    chunks.push(data::op::Run{ .m_run = static_cast<i8>(lastRun) });
-                    lastRun = 0;
-                }
-
-                // OP_INDEX
-                if (auto idx = m_runningArray.put(currentPixel); idx.has_value()) {
-                    chunks.push(data::op::Index{
-                        .m_index = static_cast<u8>(idx.value()),
-                    });
-
-                    previousPixel = currentPixel;
-                    continue;
-                }
-
-                const auto sameAlpha = [&] {
-                    if constexpr (Chan == Channels::RGB) {
-                        return true;
-                    } else {
-                        return previousPixel.m_a == currentPixel.m_a;
+                } else {
+                    if (lastRun > 0) {
+                        // ends of OP_RUN
+                        chunks.push(data::op::Run{ .m_run = static_cast<i8>(lastRun) });
+                        lastRun = 0;
                     }
-                }();
 
-                // OP_DIFF and OP_LUMA
-                if (sameAlpha) {
-                    const i8 dr = currentPixel.m_r - previousPixel.m_r;
-                    const i8 dg = currentPixel.m_g - previousPixel.m_g;
-                    const i8 db = currentPixel.m_b - previousPixel.m_b;
+                    const u8 index = hash(currentPixel) % constants::runningArraySize;
 
-                    const i8 dr_dg = dr - dg;
-                    const i8 db_dg = db - dg;
-
-                    if (data::op::shouldDiff(dr, dg, db)) {
-                        chunks.push(data::op::Diff{
-                            .m_dr = dr,
-                            .m_dg = dg,
-                            .m_db = db,
-                        });
-                    } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
-                        chunks.push(data::op::Luma{
-                            .m_dg    = dg,
-                            .m_dr_dg = dr_dg,
-                            .m_db_dg = db_dg,
-                        });
+                    // OP_INDEX
+                    if (m_runningArray[index] == currentPixel) {
+                        chunks.push(data::op::Index{ .m_index = index });
                     } else {
-                        // OP_RGB
-                        chunks.push(data::op::Rgb{
-                            .m_r = currentPixel.m_r,
-                            .m_g = currentPixel.m_g,
-                            .m_b = currentPixel.m_b,
-                        });
+                        m_runningArray[index] = currentPixel;
+                        const auto sameAlpha  = [&] {
+                            if constexpr (Chan == Channels::RGB) {
+                                return true;
+                            } else {
+                                return previousPixel.m_a == currentPixel.m_a;
+                            }
+                        }();
+
+                        // OP_DIFF and OP_LUMA
+                        if (sameAlpha) {
+                            const i8 dr = currentPixel.m_r - previousPixel.m_r;
+                            const i8 dg = currentPixel.m_g - previousPixel.m_g;
+                            const i8 db = currentPixel.m_b - previousPixel.m_b;
+
+                            const i8 dr_dg = dr - dg;
+                            const i8 db_dg = db - dg;
+
+                            if (data::op::shouldDiff(dr, dg, db)) {
+                                chunks.push(data::op::Diff{
+                                    .m_dr = dr,
+                                    .m_dg = dg,
+                                    .m_db = db,
+                                });
+                            } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
+                                chunks.push(data::op::Luma{
+                                    .m_dg    = dg,
+                                    .m_dr_dg = dr_dg,
+                                    .m_db_dg = db_dg,
+                                });
+                            } else {
+                                // OP_RGB
+                                chunks.push(data::op::Rgb{
+                                    .m_r = currentPixel.m_r,
+                                    .m_g = currentPixel.m_g,
+                                    .m_b = currentPixel.m_b,
+                                });
+                            }
+                        } else if constexpr (Chan == Channels::RGBA) {
+                            // OP_RGBA
+                            chunks.push(data::op::Rgba{
+                                .m_r = currentPixel.m_r,
+                                .m_g = currentPixel.m_g,
+                                .m_b = currentPixel.m_b,
+                                .m_a = currentPixel.m_a,
+                            });
+                        }
                     }
-                } else if constexpr (Chan == Channels::RGBA) {
-                    // OP_RGBA
-                    chunks.push(data::op::Rgba{
-                        .m_r = currentPixel.m_r,
-                        .m_g = currentPixel.m_g,
-                        .m_b = currentPixel.m_b,
-                        .m_a = currentPixel.m_a,
-                    });
                 }
 
                 previousPixel = currentPixel;
@@ -523,13 +502,25 @@ namespace qoipp::impl
         }
 
     private:
-        std::span<const Byte> m_data;
-        RunningArray<Chan>    m_runningArray;
+        std::span<const Byte>       m_data;
+        std::array<Pixel<Chan>, 64> m_runningArray;
 
         const Pixel<Chan>& getPixel(usize index)
         {
             const usize dataIndex = index * static_cast<u32>(Chan);
             return reinterpret_cast<const Pixel<Chan>&>(m_data[dataIndex]);
+        }
+
+        usize hash(const Pixel<Chan>& pixel) const
+        {
+            if constexpr (Chan == Channels::RGBA) {
+                const auto& [r, g, b, a] = pixel;
+                return (r * 3 + g * 5 + b * 7 + a * 11);
+            } else {
+                const auto& [r, g, b] = pixel;
+                const u8 a            = constants::start<Channels::RGBA>.m_a;
+                return (r * 3 + g * 5 + b * 7 + a * 11);
+            }
         }
     };
 
