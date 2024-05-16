@@ -2,6 +2,7 @@
 
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -101,6 +102,8 @@ namespace qoipp
 
 namespace qoipp::constants
 {
+    constexpr std::array<char, 4> magic = { 'q', 'o', 'i', 'f' };
+
     constexpr usize      headerSize       = 14;
     constexpr usize      runningArraySize = 64;
     constexpr ByteArr<8> endMarker        = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
@@ -142,7 +145,7 @@ namespace qoipp::data
 
     struct QoiHeader
     {
-        std::array<char, 4> m_magic = { 'q', 'o', 'i', 'f' };
+        std::array<char, 4> m_magic = constants::magic;
 
         u32 m_width;
         u32 m_height;
@@ -357,8 +360,8 @@ namespace qoipp::impl
 
         // TODO: correct colorspace field
         chunks.push(data::QoiHeader{
-            .m_width      = static_cast<u32>(width),
-            .m_height     = static_cast<u32>(height),
+            .m_width      = width,
+            .m_height     = height,
             .m_channels   = static_cast<u8>(Chan),
             .m_colorspace = static_cast<u8>(srgb ? 0 : 1),
         });
@@ -442,16 +445,149 @@ namespace qoipp::impl
 
         return chunks.get();
     }
+
     // TODO: implement
     template <Channels Chan>
-    QoiImage decode(std::span<const Byte> data) noexcept(false)
+    ByteVec decode(std::span<const Byte> data, usize width, usize height) noexcept(false)
     {
-        throw std::runtime_error{ "Not implemented yet" };
+        ByteVec decodedData(static_cast<usize>(width * height * static_cast<i32>(Chan)));
+
+        RunningArray seenPixels = {};
+        Pixel        prevPixel  = constants::start;
+
+        const auto get = [&](usize index, usize offset) -> Byte& {
+            return decodedData[index * static_cast<usize>(Chan) + offset];
+        };
+
+        // seenPixels[hash(prevPixel) % constants::runningArraySize] = prevPixel;
+
+        usize chunksSize = data.size() - constants::headerSize - constants::endMarker.size();
+        for (usize pixelIndex = 0, dataIndex = constants::headerSize;
+             dataIndex < chunksSize || pixelIndex < width * height;
+             ++pixelIndex) {
+            const auto tag = std::to_integer<u8>(data[dataIndex++]);
+
+            using T = data::op::Tag;
+            switch (tag) {
+            case T::OP_RGB: {
+                get(pixelIndex, 0) = data[dataIndex++];
+                get(pixelIndex, 1) = data[dataIndex++];
+                get(pixelIndex, 2) = data[dataIndex++];
+                if constexpr (Chan == Channels::RGBA) {
+                    get(pixelIndex, 3) = static_cast<Byte>(prevPixel.m_a);
+                }
+            } break;
+            case T::OP_RGBA: {
+                get(pixelIndex, 0) = data[dataIndex++];
+                get(pixelIndex, 1) = data[dataIndex++];
+                get(pixelIndex, 2) = data[dataIndex++];
+                if constexpr (Chan == Channels::RGBA) {
+                    get(pixelIndex, 3) = data[dataIndex++];
+                }
+            } break;
+            default:
+                switch (tag & 0b11000000) {
+                case T::OP_INDEX: {
+                    auto& pixel = seenPixels[tag & 0b00111111];
+
+                    get(pixelIndex, 0) = static_cast<Byte>(pixel.m_r);
+                    get(pixelIndex, 1) = static_cast<Byte>(pixel.m_g);
+                    get(pixelIndex, 2) = static_cast<Byte>(pixel.m_b);
+                    if constexpr (Chan == Channels::RGBA) {
+                        get(pixelIndex, 3) = static_cast<Byte>(pixel.m_a);
+                    }
+                } break;
+                case T::OP_DIFF: {
+                    const i8 dr = ((tag & 0b00110000) >> 4) - constants::biasOpDiff;
+                    const i8 dg = ((tag & 0b00001100) >> 2) - constants::biasOpDiff;
+                    const i8 db = ((tag & 0b00000011)) - constants::biasOpDiff;
+
+                    get(pixelIndex, 0) = static_cast<Byte>(dr + prevPixel.m_r);
+                    get(pixelIndex, 1) = static_cast<Byte>(dg + prevPixel.m_g);
+                    get(pixelIndex, 2) = static_cast<Byte>(db + prevPixel.m_b);
+                    if constexpr (Chan == Channels::RGBA) {
+                        get(pixelIndex, 3) = static_cast<Byte>(prevPixel.m_a);
+                    }
+                } break;
+                case T::OP_LUMA: {
+                    const auto redBlue = std::to_integer<u8>(data[dataIndex++]);
+
+                    const u8 dg    = (tag & 0b00111111) - constants::biasOpLumaG;
+                    const u8 dr_dg = ((redBlue & 0b11110000) >> 4) - constants::biasOpLumaRB;
+                    const u8 db_dg = (redBlue & 0b00001111) - constants::biasOpLumaRB;
+
+                    get(pixelIndex, 0) = static_cast<Byte>(dg + dr_dg + prevPixel.m_r);
+                    get(pixelIndex, 1) = static_cast<Byte>(dg + prevPixel.m_g);
+                    get(pixelIndex, 2) = static_cast<Byte>(dg + db_dg + prevPixel.m_b);
+                    if constexpr (Chan == Channels::RGBA) {
+                        get(pixelIndex, 3) = static_cast<Byte>(prevPixel.m_a);
+                    }
+                } break;
+                case T::OP_RUN: {
+                    auto run = (tag & 0b00111111) - constants::biasOpRun;
+                    while (run-- > 0) {
+                        get(pixelIndex, 0) = static_cast<Byte>(prevPixel.m_r);
+                        get(pixelIndex, 1) = static_cast<Byte>(prevPixel.m_g);
+                        get(pixelIndex, 2) = static_cast<Byte>(prevPixel.m_b);
+                        if constexpr (Chan == Channels::RGBA) {
+                            get(pixelIndex, 3) = static_cast<Byte>(prevPixel.m_a);
+                        }
+                        ++pixelIndex;
+                    }
+                    --pixelIndex;
+                } break;
+                default: [[unlikely]] /* invalid tag (is this eve possible?)*/;
+                }
+            }
+
+            prevPixel.m_r = std::to_integer<u8>(get(pixelIndex, 0));
+            prevPixel.m_g = std::to_integer<u8>(get(pixelIndex, 1));
+            prevPixel.m_b = std::to_integer<u8>(get(pixelIndex, 2));
+            if constexpr (Chan == Channels::RGBA) {
+                prevPixel.m_a = std::to_integer<u8>(get(pixelIndex, 3));
+            }
+
+            seenPixels[hash(prevPixel) % constants::runningArraySize] = prevPixel;
+        }
+
+        return decodedData;
     }
 }
 
 namespace qoipp
 {
+    std::optional<ImageDesc> readHeader(ByteSpan data)
+    {
+        if (data.size() < constants::headerSize) {
+            return std::nullopt;
+        }
+
+        using Magic = decltype(data::QoiHeader::m_magic);
+        auto* magic = reinterpret_cast<const Magic*>(data.data());
+
+        if (std::memcmp(magic, constants::magic.data(), constants::magic.size()) != 0) {
+            return std::nullopt;
+        }
+
+        usize index = constants::magic.size();
+        u32   width, height;
+        u32   channels, colorspace;
+
+        std::memcpy(&width, data.data() + index, sizeof(u32));
+        index += sizeof(u32);
+        std::memcpy(&height, data.data() + index, sizeof(u32));
+        index      += sizeof(u32);
+        channels    = std::to_integer<u8>(data[index++]);
+        colorspace  = std::to_integer<u8>(data[index++]);
+
+        return ImageDesc{
+            .m_width      = static_cast<i32>(fromBigEndian(width)),
+            .m_height     = static_cast<i32>(fromBigEndian(height)),
+            .m_channels   = static_cast<Channels>(channels),
+            .m_colorspace = static_cast<Colorspace>(colorspace),
+        };
+    }
+
     std::vector<Byte> encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
@@ -490,7 +626,7 @@ namespace qoipp
             };
         }
 
-        bool isSrgb = colorspace == ColorSpace::sRGB;
+        bool isSrgb = colorspace == Colorspace::sRGB;
         if (channels == Channels::RGB) {
             return impl::encode<Channels::RGB>(data, (u32)width, (u32)height, isSrgb);
         } else {
@@ -501,6 +637,28 @@ namespace qoipp
     // TODO: implement
     QoiImage decode(ByteSpan data) noexcept(false)
     {
-        throw std::runtime_error{ "Not implemented yet" };
+        if (data.size() == 0) {
+            throw std::invalid_argument{ "Data is empty" };
+        }
+
+        const auto desc = [&] {
+            if (auto header = readHeader(data); header.has_value()) {
+                return header.value();
+            } else {
+                throw std::invalid_argument{ "Invalid header" };
+            }
+        }();
+
+        if (desc.m_channels == Channels::RGB) {
+            return {
+                .m_data = impl::decode<Channels::RGB>(data, (usize)desc.m_width, (usize)desc.m_height),
+                .m_desc = desc,
+            };
+        } else {
+            return {
+                .m_data = impl::decode<Channels::RGBA>(data, (usize)desc.m_width, (usize)desc.m_height),
+                .m_desc = desc,
+            };
+        }
     }
 }

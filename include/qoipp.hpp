@@ -2,6 +2,7 @@
 #define QOIPP_HPP_O4A387W5ER6OW7E
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 #include <span>
 
@@ -14,7 +15,7 @@ namespace qoipp
     concept CharLike = std::same_as<C, char> or std::same_as<C, unsigned char>
                     or std::same_as<C, signed char>;
 
-    enum class ColorSpace : int
+    enum class Colorspace : int
     {
         sRGB   = 0,
         Linear = 1,
@@ -31,7 +32,7 @@ namespace qoipp
         int        m_width;
         int        m_height;
         Channels   m_channels;
-        ColorSpace m_colorSpace;
+        Colorspace m_colorspace;
 
         constexpr auto operator<=>(const ImageDesc&) const = default;
     };
@@ -41,6 +42,14 @@ namespace qoipp
         ByteVec   m_data;
         ImageDesc m_desc;
     };
+
+    /**
+     * @brief Read the header of a QOI image
+     *
+     * @param data The data to read the header from
+     * @return std::optional<ImageDesc> The description of the image if it is a valid QOI image
+     */
+    std::optional<ImageDesc> readHeader(ByteSpan data);
 
     /**
      * @brief Encode the given data into a QOI image
