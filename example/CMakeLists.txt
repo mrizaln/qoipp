@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.16)
+project(example VERSION 0.0.1)
+
+include(cmake/prelude.cmake)
+include(cmake/mold.cmake)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+# set(CMAKE_COLOR_DIAGNOSTICS ON) # You might want to enable this (CMake 3.24+)
+
+find_package(fmt REQUIRED)
+find_package(stb REQUIRED)
+find_package(range-v3 REQUIRED)
+find_package(PerlinNoise REQUIRED)
+
+target_compile_features(range-v3::range-v3 INTERFACE cxx_std_20)
+
+add_subdirectory(lib/qoipp) # emits qoipp target
+
+set(DEPS fmt::fmt stb::stb range-v3::range-v3 siv::PerlinNoise qoipp)
+set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
+
+# ~~~
+# set(LINK_FLAGS -fsanitize=address,leak,undefined)
+# set(COMPILE_FLAGS -fsanitize=address,leak,undefined)
+
+function(create_executable NAME)
+  add_executable(${NAME} source/${NAME}.cpp)
+  target_include_directories(${NAME} PRIVATE source)
+  target_link_libraries(${NAME} PRIVATE ${DEPS})
+  target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
+  target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
+endfunction()
+
+create_executable(generate)
+create_executable(qoiconv)
