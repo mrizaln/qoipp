@@ -635,19 +635,28 @@ namespace qoipp
     }
 
     // TODO: implement
-    QoiImage decode(ByteSpan data) noexcept(false)
+    QoiImage decode(ByteSpan data, std::optional<Channels> channels) noexcept(false)
     {
         if (data.size() == 0) {
             throw std::invalid_argument{ "Data is empty" };
         }
 
-        const auto desc = [&] {
+        auto desc = [&] {
             if (auto header = readHeader(data); header.has_value()) {
                 return header.value();
             } else {
                 throw std::invalid_argument{ "Invalid header" };
             }
         }();
+
+        if (channels.has_value() && channels.value() == Channels::RGBA && desc.m_channels == Channels::RGB) {
+            throw std::invalid_argument{ "Cannot extract RGBA channels from an RGB image" };
+        }
+
+        // override the channels to be extracted
+        if (channels.has_value()) {
+            desc.m_channels = channels.value();
+        }
 
         if (desc.m_channels == Channels::RGB) {
             return {

@@ -72,16 +72,18 @@ namespace qoipp
      * @brief Decode the given QOI image
      *
      * @param data The QOI image to decode
+     * @param channels The channels you want to extract from the image (default is all)
      * @return QoiImage The decoded image
-     * @throw std::runtime_error If the data is not a valid QOI image
+     * @throw std::invalid_argument If the data is not a valid QOI image or when the extracted channels are
+     *                              more than the channels in the image (RGBA from RGB image)
      */
-    QoiImage decode(ByteSpan data) noexcept(false);
+    QoiImage decode(ByteSpan data, std::optional<Channels> channels) noexcept(false);
 
     template <CharLike Char>
-    inline QoiImage decode(std::span<const Char> data) noexcept(false)
+    inline QoiImage decode(std::span<const Char> data, std::optional<Channels> channels) noexcept(false)
     {
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
-        return decode(byteData);
+        return decode(byteData, channels);
     }
 }
 
