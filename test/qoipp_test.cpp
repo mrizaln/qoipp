@@ -2,12 +2,15 @@
 
 #include <boost/ut.hpp>
 #include <fmt/core.h>
-#include <fmt/ranges.h>
+#include <fmt/color.h>
 
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
+#include <initializer_list>
+#include <ranges>
+#include <string>
 
 using i8  = std::int8_t;
 using i16 = std::int16_t;
@@ -27,78 +30,111 @@ using f64 = double;
 
 using Byte = std::byte;
 
-template <usize N>
-using ByteArr = std::array<Byte, N>;
-using ByteVec = std::vector<Byte>;
+using qoipp::ByteSpan;
+using qoipp::ByteVec;
 
 namespace ut = boost::ut;
 using namespace ut::literals;
 using namespace ut::operators;
 
-void threeChannelImage()
+ByteVec toBytes(std::initializer_list<u8> data)
 {
+    ByteVec result(data.size());
+    for (auto i : std::views::iota(0u, data.size())) {
+        result[i] = Byte(data.begin()[i]);
+    }
+    return result;
+}
+
+// too bad ut doesn't have something like this that can show diff between two spans
+std::string compare(ByteSpan lhs, ByteSpan rhs)
+{
+    std::string result = fmt::format(
+        "SHOULD BE EQUALS FOR ALL ELEMENTS:\nlhs size: {} | rhs size: {}\n", lhs.size(), rhs.size()
+    );
+
+    for (auto i : std::views::iota(0u, std::min(lhs.size(), rhs.size()))) {
+        auto diff   = (u8)lhs[i] - (u8)rhs[i];
+        auto color  = diff == 0 ? fmt::color::green_yellow : fmt::color::orange_red;
+        result     += fmt::format(fg(color), "{:#04x} - {:#04x} = {:#04x}\n", lhs[i], rhs[i], diff);
+    }
+
+    result += fmt::format(
+        "{} more from {}",
+        lhs.size() > rhs.size() ? lhs.size() - rhs.size() : rhs.size() - lhs.size(),
+        lhs.size() > rhs.size() ? "lhs" : "rhs"
+    );
+
+    return result;
+}
+
+ut::suite threeChannelImage = [] {
     constexpr qoipp::ImageDesc desc{
         .m_width      = 29,
         .m_height     = 17,
-        .m_channels   = 3,
-        .m_colorSpace = qoipp::ColorSpace::sRGB,
+        .m_channels   = qoipp::Channels::RGB,
+        .m_colorspace = qoipp::Colorspace::sRGB,
     };
 
     // I cropped a random image on my disk to get this data
-    const std::vector<u8> image = {
+    const ByteVec rawImage = toBytes({
 #include "image_raw_3.txt"
-    };
+    });
 
     // The generated qoi data here is generated using ImageMagick's convert command with the input above
-    const std::vector<u8> expected = {
+    const ByteVec qoiImage = toBytes({
 #include "image_qoi_3.txt"
-    };
+    });
 
     "3-channel image encode test"_test = [&] {
-        const auto actual = qoipp::encode({ (std::byte*)image.data(), image.size() }, desc);
-        ut::expect(actual.size() == expected.size());
-        ut::expect(std::memcmp(actual.data(), expected.data(), expected.size()) == 0_i);
+        const auto encoded = qoipp::encode(rawImage, desc);
+        ut::expect(ut::that % encoded.size() == qoiImage.size());
+        ut::expect(std::memcmp(encoded.data(), qoiImage.data(), qoiImage.size()) == 0_i)
+            << compare(qoiImage, encoded);
     };
 
     "3-channel image decode test"_test = [&] {
-        const auto [actual, actualdesc] = qoipp::decode({ (std::byte*)expected.data(), expected.size() });
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage);
         ut::expect(actualdesc == desc);
-        ut::expect(std::memcmp(actual.data(), image.data(), image.size()) == 0_i);
+        ut::expect(ut::that % decoded.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
+            << compare(rawImage, decoded);
     };
-}
+};
 
-void fourChannelImage()
-{
+ut::suite fourChannelImage = [] {
     constexpr qoipp::ImageDesc desc{
         .m_width      = 24,
         .m_height     = 14,
-        .m_channels   = 4,
-        .m_colorSpace = qoipp::ColorSpace::sRGB,
+        .m_channels   = qoipp::Channels::RGBA,
+        .m_colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const std::vector<u8> image = {
+    const ByteVec rawImage = toBytes({
 #include "image_raw_4.txt"
-    };
+    });
 
-    const std::vector<u8> expected = {
+    const ByteVec qoiImage = toBytes({
 #include "image_qoi_4.txt"
-    };
+    });
 
     "4-channel image encode test"_test = [&] {
-        const auto actual = qoipp::encode({ (std::byte*)image.data(), image.size() }, desc);
-        ut::expect(actual.size() == expected.size());
-        ut::expect(std::memcmp(actual.data(), expected.data(), expected.size()) == 0_i);
+        const auto encoded = qoipp::encode(rawImage, desc);
+        ut::expect(encoded.size() == qoiImage.size());
+        ut::expect(std::memcmp(encoded.data(), qoiImage.data(), qoiImage.size()) == 0_i)
+            << compare(qoiImage, encoded);
     };
 
     "4-channel image decode test"_test = [&] {
-        const auto [actual, actualdesc] = qoipp::decode({ (std::byte*)expected.data(), expected.size() });
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage);
         ut::expect(actualdesc == desc);
-        ut::expect(std::memcmp(actual.data(), image.data(), image.size()) == 0_i);
+        ut::expect(ut::that % decoded.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
+            << compare(rawImage, decoded);
     };
-}
+};
 
 int main()
 {
-    threeChannelImage();
-    fourChannelImage();
+    /* empty */
 }
