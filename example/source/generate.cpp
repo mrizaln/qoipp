@@ -145,7 +145,7 @@ int main()
         .m_width      = 500,
         .m_height     = 500,
         .m_channels   = qoipp::Channels::RGB,
-        .m_colorSpace = qoipp::ColorSpace::sRGB,
+        .m_colorspace = qoipp::Colorspace::sRGB,
     };
 
     auto bytes = DO_TIME_MS ("Generate image")
