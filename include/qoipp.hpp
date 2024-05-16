@@ -14,17 +14,23 @@ namespace qoipp
     concept CharLike = std::same_as<C, char> or std::same_as<C, unsigned char>
                     or std::same_as<C, signed char>;
 
-    enum class ColorSpace
+    enum class ColorSpace : int
     {
         sRGB   = 0,
         Linear = 1,
+    };
+
+    enum class Channels : int
+    {
+        RGB  = 3,
+        RGBA = 4,
     };
 
     struct ImageDesc
     {
         int        m_width;
         int        m_height;
-        int        m_channels;
+        Channels   m_channels;
         ColorSpace m_colorSpace;
 
         constexpr auto operator<=>(const ImageDesc&) const = default;

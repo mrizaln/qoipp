@@ -104,7 +104,7 @@ Image readPng(const fs::path& filepath)
         .m_desc = {
             .m_width      = width,
             .m_height     = height,
-            .m_channels   = channels,
+            .m_channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
             .m_colorSpace = qoipp::ColorSpace::sRGB,    // dummy; unused
         },
     } };
@@ -132,7 +132,7 @@ void writePng(const Image& image, const fs::path& filepath)
     auto [width, height, channels, _]{ desc };
     auto status = DO_TIME_MS ("Encode png (stb) [and write to file]")
     {
-        return stbi_write_png(filepath.c_str(), width, height, channels, data, 0);
+        return stbi_write_png(filepath.c_str(), width, height, (int)channels, data, 0);
     };
 
     if (status == 0) {
@@ -146,7 +146,7 @@ void writeQoi(const Image& image, const fs::path& filepath)
     auto [data, desc] = image.visit(Overloaded{
         [&](const StbImage& d) {
             auto [width, height, channels, _]{ d.m_desc };
-            const auto size = static_cast<std::size_t>(width * height * channels);
+            const auto size = static_cast<std::size_t>(width * height * (int)channels);
             return tup({ reinterpret_cast<std::byte*>(d.m_data.get()), size }, d.m_desc);
         },
         [&](const QoiImage& d) { return tup(d.m_data, d.m_desc); },

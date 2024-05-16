@@ -144,7 +144,7 @@ int main()
     qoipp::ImageDesc desc{
         .m_width      = 500,
         .m_height     = 500,
-        .m_channels   = 3,
+        .m_channels   = qoipp::Channels::RGB,
         .m_colorSpace = qoipp::ColorSpace::sRGB,
     };
 

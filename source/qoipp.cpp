@@ -12,11 +12,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef QOIPP_DEBUG
-#    include <unordered_map>
-#    include <iostream>
-#endif
-
 #if defined(_MSC_VER)
 #    define QOIPP_ALWAYS_INLINE [[msvc::forceinline]]
 #elif defined(__GNUC__)
@@ -92,12 +87,6 @@ namespace qoipp
     {
         return toBigEndian(value);
     }
-
-    enum class Channels
-    {
-        RGB  = 3,
-        RGBA = 4,
-    };
 
     struct Pixel
     {
@@ -315,34 +304,13 @@ namespace qoipp::impl
         DataChunkArray(usize size)
             : m_bytes(size)
         {
-#ifdef QOIPP_DEBUG
-            std::cout << "DataChunkArray init with size: " << std::dec << size << '\n';
-#endif
         }
 
-#ifdef QOIPP_DEBUG
-        ~DataChunkArray()
-        {
-            std::cerr << "Op stats:\n";
-            for (auto& [k, c] : m_opCount) {
-                std::cerr << std::format("\t{}\t:{}\n", k, c);
-            }
-        }
-#endif
         template <typename T>
             requires(data::op::Op<T> or AnyOf<T, data::QoiHeader, data::EndMarker>)
         QOIPP_ALWAYS_INLINE void push(T&& t) noexcept
         {
-#ifdef QOIPP_DEBUG
-            m_opCount[typeid(T).name()]++;
-#endif
             t.write(m_bytes, m_index);
-
-#ifdef QOIPP_DEBUG
-            if (m_index > m_bytes.size()) {
-                throw std::runtime_error{ "Out of bound write" };
-            }
-#endif
         }
 
         ByteVec get() noexcept
@@ -354,10 +322,6 @@ namespace qoipp::impl
     private:
         ByteVec m_bytes;
         usize   m_index = 0;
-
-#ifdef QOIPP_DEBUG
-        std::unordered_map<std::string, i32> m_opCount;
-#endif
     };
 
     using RunningArray = std::array<Pixel, constants::runningArraySize>;
@@ -491,18 +455,18 @@ namespace qoipp
     std::vector<Byte> encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto maxSize                               = static_cast<usize>(width * height * channels);
+        const auto maxSize = static_cast<usize>(width * height * static_cast<i32>(channels));
 
-        if (width <= 0 || height <= 0 || channels <= 0) {
-            throw std::invalid_argument{
-                std::format("Invalid image description: w = {}, h = {}, c = {}", width, height, channels)
-            };
+        if (width <= 0 || height <= 0) {
+            throw std::invalid_argument{ std::format(
+                "Invalid image description: w = {}, h = {}, c = {}", width, height, static_cast<i32>(channels)
+            ) };
         }
 
-        if (channels != 3 && channels != 4) {
-            throw std::invalid_argument{
-                std::format("Invalid number of channels: expected 3 or 4, got {}", channels)
-            };
+        if (static_cast<i32>(channels) != 3 && static_cast<i32>(channels) != 4) {
+            throw std::invalid_argument{ std::format(
+                "Invalid number of channels: expected 3 (RGB) or 4 (RGBA), got {}", static_cast<i32>(channels)
+            ) };
         }
 
         if (data.size() != maxSize) {
@@ -510,24 +474,24 @@ namespace qoipp
                 "Data size does not match the image description: expected {} x {} x {} = {}, got {}",
                 width,
                 height,
-                channels,
+                static_cast<i32>(channels),
                 maxSize,
                 data.size()
             ) };
         }
 
-        if (channels == 3 && data.size() % 3 != 0) {
+        if (channels == Channels::RGB && data.size() % 3 != 0) {
             throw std::invalid_argument{
                 "Data does not align with the number of channels: expected multiple of 3 bytes"
             };
-        } else if (channels == 4 && data.size() % 4 != 0) {
+        } else if (channels == Channels::RGBA && data.size() % 4 != 0) {
             throw std::invalid_argument{
                 "Data does not align with the number of channels: expected multiple of 4 bytes"
             };
         }
 
         bool isSrgb = colorspace == ColorSpace::sRGB;
-        if (channels == 3) {
+        if (channels == Channels::RGB) {
             return impl::encode<Channels::RGB>(data, (u32)width, (u32)height, isSrgb);
         } else {
             return impl::encode<Channels::RGBA>(data, (u32)width, (u32)height, isSrgb);
