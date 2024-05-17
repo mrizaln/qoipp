@@ -5,7 +5,6 @@
 #include <fmt/color.h>
 #include <range/v3/view.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

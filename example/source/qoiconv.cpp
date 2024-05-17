@@ -55,7 +55,7 @@ struct Image
                 [&](const QoiImage& d) { return tup(d.m_data, d.m_desc); },
                 [&](const StbImage& d) {
                     auto [width, height, channels, _]{ d.m_desc };
-                    const auto size = static_cast<std::size_t>(width * height * (int)channels);
+                    const auto size = (width * height * static_cast<std::size_t>(channels));
                     return tup({ reinterpret_cast<std::byte*>(d.m_data.get()), size }, d.m_desc);
                 },
             },
@@ -123,8 +123,8 @@ Image readPng(const fs::path& filepath)
     return { StbImage{
         .m_data = StbImage::UniqueData{ data },
         .m_desc = {
-            .m_width      = width,
-            .m_height     = height,
+            .m_width      = static_cast<unsigned int>(width),
+            .m_height     = static_cast<unsigned int>(height),
             .m_channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
             .m_colorspace = qoipp::Colorspace::sRGB,    // dummy; unused
         },
@@ -150,7 +150,12 @@ void writePng(const Image& image, const fs::path& filepath)
         using Data                        = StbImage::Data;
         auto [width, height, channels, _] = desc;
         return stbi_write_png(
-            filepath.c_str(), width, height, (int)channels, reinterpret_cast<const Data*>(data.data()), 0
+            filepath.c_str(),
+            (int)width,
+            (int)height,
+            (int)channels,
+            reinterpret_cast<const Data*>(data.data()),
+            0
         );
     };
 

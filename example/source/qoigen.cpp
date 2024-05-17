@@ -71,10 +71,10 @@ public:
         fmt::println("");
     }
 
-    ByteVec generate(int width, int height)
+    ByteVec generate(unsigned int width, unsigned int height)
     {
 
-        const auto pixelSize = static_cast<std::size_t>(width * height);
+        const auto pixelSize = width * height;
         const auto channels  = static_cast<std::size_t>(m_channels);
 
         ByteVec result;
@@ -89,8 +89,8 @@ public:
         };
 
         for (auto i : rv::iota(0u, pixelSize)) {
-            const auto x = i % static_cast<std::size_t>(width);
-            const auto y = i / static_cast<std::size_t>(height);
+            const auto x = i % width;
+            const auto y = i / height;
 
             std::vector<float> fx(channels);
             std::vector<float> fy(channels);
@@ -152,8 +152,8 @@ int main(int argc, char* argv[])
     CLI11_PARSE(app, argc, argv);
 
     qoipp::ImageDesc desc{
-        .m_width      = (int)width,
-        .m_height     = (int)height,
+        .m_width      = width,
+        .m_height     = height,
         .m_channels   = channels,
         .m_colorspace = qoipp::Colorspace::sRGB,
     };

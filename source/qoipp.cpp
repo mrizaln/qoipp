@@ -579,8 +579,8 @@ namespace qoipp
         colorspace  = std::to_integer<u8>(data[index++]);
 
         return ImageDesc{
-            .m_width      = static_cast<i32>(fromBigEndian(width)),
-            .m_height     = static_cast<i32>(fromBigEndian(height)),
+            .m_width      = fromBigEndian(width),
+            .m_height     = fromBigEndian(height),
             .m_channels   = static_cast<Channels>(channels),
             .m_colorspace = static_cast<Colorspace>(colorspace),
         };
@@ -589,7 +589,7 @@ namespace qoipp
     std::vector<Byte> encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto maxSize = static_cast<usize>(width * height * static_cast<i32>(channels));
+        const auto maxSize = static_cast<usize>(width * height * static_cast<u32>(channels));
 
         if (width <= 0 || height <= 0) {
             throw std::invalid_argument{ std::format(
@@ -626,9 +626,9 @@ namespace qoipp
 
         bool isSrgb = colorspace == Colorspace::sRGB;
         if (channels == Channels::RGB) {
-            return impl::encode<Channels::RGB>(data, (u32)width, (u32)height, isSrgb);
+            return impl::encode<Channels::RGB>(data, width, height, isSrgb);
         } else {
-            return impl::encode<Channels::RGBA>(data, (u32)width, (u32)height, isSrgb);
+            return impl::encode<Channels::RGBA>(data, width, height, isSrgb);
         }
     }
 
@@ -649,20 +649,18 @@ namespace qoipp
 
         if (desc.m_channels == Channels::RGB) {
             return {
-                .m_data = impl::decode<Channels::RGB>(data, (usize)desc.m_width, (usize)desc.m_height),
+                .m_data = impl::decode<Channels::RGB>(data, desc.m_width, desc.m_height),
                 .m_desc = desc,
             };
         } else if (rgbOnly) {
             desc.m_channels = Channels::RGB;
             return {
-                .m_data = impl::decode<Channels::RGBA, Channels::RGB>(
-                    data, (usize)desc.m_width, (usize)desc.m_height
-                ),
+                .m_data = impl::decode<Channels::RGBA, Channels::RGB>(data, desc.m_width, desc.m_height),
                 .m_desc = desc,
             };
         } else {
             return {
-                .m_data = impl::decode<Channels::RGBA>(data, (usize)desc.m_width, (usize)desc.m_height),
+                .m_data = impl::decode<Channels::RGBA>(data, desc.m_width, desc.m_height),
                 .m_desc = desc,
             };
         }

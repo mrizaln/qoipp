@@ -29,10 +29,10 @@ namespace qoipp
 
     struct ImageDesc
     {
-        int        m_width;
-        int        m_height;
-        Channels   m_channels;
-        Colorspace m_colorspace;
+        unsigned int m_width;
+        unsigned int m_height;
+        Channels     m_channels;
+        Colorspace   m_colorspace;
 
         constexpr auto operator<=>(const ImageDesc&) const = default;
     };
