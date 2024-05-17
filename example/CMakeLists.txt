@@ -14,11 +14,13 @@ find_package(stb REQUIRED)
 find_package(range-v3 REQUIRED)
 find_package(PerlinNoise REQUIRED)
 
+include(cmake/fetched-lib.cmake)  # emits qoi
+
 target_compile_features(range-v3::range-v3 INTERFACE cxx_std_20)
 
 add_subdirectory(lib/qoipp) # emits qoipp target
 
-set(DEPS fmt::fmt stb::stb range-v3::range-v3 siv::PerlinNoise qoipp)
+set(DEPS fmt::fmt stb::stb range-v3::range-v3 siv::PerlinNoise qoipp qoi)
 set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
 
 # ~~~
@@ -33,5 +35,6 @@ function(create_executable NAME)
   target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
 endfunction()
 
-create_executable(generate)
+create_executable(qoigen)
 create_executable(qoiconv)
+create_executable(qoibench)
