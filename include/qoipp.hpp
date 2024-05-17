@@ -3,8 +3,8 @@
 
 #include <cstddef>
 #include <optional>
-#include <vector>
 #include <span>
+#include <vector>
 
 namespace qoipp
 {
@@ -72,18 +72,17 @@ namespace qoipp
      * @brief Decode the given QOI image
      *
      * @param data The QOI image to decode
-     * @param channels The channels you want to extract from the image (default is all)
+     * @param rgbOnly If true, only the RGB channels will be extracted
      * @return QoiImage The decoded image
-     * @throw std::invalid_argument If the data is not a valid QOI image or when the extracted channels are
-     *                              more than the channels in the image (RGBA from RGB image)
+     * @throw std::invalid_argument If the data is not a valid QOI image
      */
-    QoiImage decode(ByteSpan data, std::optional<Channels> channels) noexcept(false);
+    QoiImage decode(ByteSpan data, bool rgbOnly = false) noexcept(false);
 
     template <CharLike Char>
-    inline QoiImage decode(std::span<const Char> data, std::optional<Channels> channels) noexcept(false)
+    inline QoiImage decode(std::span<const Char> data, bool rgbOnly = false) noexcept(false)
     {
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
-        return decode(byteData, channels);
+        return decode(byteData, rgbOnly);
     }
 }
 
