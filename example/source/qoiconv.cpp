@@ -8,6 +8,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 #include <fmt/core.h>
+#include <CLI/CLI.hpp>
 
 #include <stdexcept>
 #include <utility>
@@ -130,12 +131,12 @@ Image readPng(const fs::path& filepath)
     } };
 }
 
-Image readQoi(const fs::path& filepath)
+Image readQoi(const fs::path& filepath, bool rgbOnly)
 {
     auto bytes   = loadFile(filepath);
     auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
     {
-        return qoipp::decode(bytes);
+        return qoipp::decode(bytes, rgbOnly);
     };
     return { decoded };
 }
@@ -173,13 +174,6 @@ void writeQoi(const Image& image, const fs::path& filepath)
     };
 }
 
-void printHelp(const char* prog)
-{
-    fmt::println("Usage   : {} <infile> <outfile>", prog);
-    fmt::println("Examples: {} input.png output.qoi", prog);
-    fmt::println("          {} input.qoi output.png", prog);
-}
-
 std::pair<FileType, FileType> validate(const fs::path& input, const fs::path& output) noexcept(false)
 {
     const auto isPng = [](const fs::path& p) { return p.extension() == ".png"; };
@@ -213,19 +207,22 @@ std::pair<FileType, FileType> validate(const fs::path& input, const fs::path& ou
 
 int main(int argc, char** argv)
 try {
+    CLI::App app{ "QOI to PNG and PNG to QOI converter" };
+
+    fs::path inputPath;
+    fs::path outputPath;
+    bool     rgbOnly = false;
+
+    app.add_option("infile", inputPath, "Input filepath")->required();
+    app.add_option("outfile", outputPath, "Output filepath")->required();
+    app.add_flag("--rgb-only", rgbOnly, "Extract rgb only (for QOI image)");
+
     if (argc <= 1) {
-        printHelp(argv[0]);
+        fmt::print("{}", app.help());
         return 0;
-    } else if (argc <= 2) {
-        fmt::println("Please provide a path to output file\n");
-        printHelp(argv[0]);
-        return 1;
-    } else if (argc > 3) {
-        fmt::println("Ignoring extraneous arguments");
     }
 
-    fs::path inputPath{ argv[1] };
-    fs::path outputPath{ argv[2] };
+    CLI11_PARSE(app, argc, argv);
 
     auto [input, output] = validate(inputPath, outputPath);
     if (input == FileType::PNG && output == FileType::QOI) {
@@ -233,7 +230,7 @@ try {
         image.printInfo();
         writeQoi(image, outputPath);
     } else if (input == FileType::QOI && output == FileType::PNG) {
-        auto image = readQoi(inputPath);
+        auto image = readQoi(inputPath, rgbOnly);
         image.printInfo();
         writePng(image, outputPath);
     } else [[unlikely]] {
@@ -241,7 +238,6 @@ try {
     }
 
 } catch (std::exception& e) {
-    fmt::println("Exception occurred: {}\n", e.what());
-    printHelp(argv[0]);
+    fmt::println("Exception occurred: {}", e.what());
     return 1;
 }

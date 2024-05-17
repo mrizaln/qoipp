@@ -9,6 +9,7 @@ class Recipe(ConanFile):
         "perlinnoise/3.0.0",
         "range-v3/0.12.0",
         "stb/cci.20230920",
+        "cli11/2.4.1",
     ]
 
     def layout(self):
