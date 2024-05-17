@@ -37,7 +37,7 @@ namespace qoipp
         constexpr auto operator<=>(const ImageDesc&) const = default;
     };
 
-    struct QoiImage
+    struct Image
     {
         ByteVec   m_data;
         ImageDesc m_desc;
@@ -73,13 +73,13 @@ namespace qoipp
      *
      * @param data The QOI image to decode
      * @param rgbOnly If true, only the RGB channels will be extracted
-     * @return QoiImage The decoded image
+     * @return Image The decoded image
      * @throw std::invalid_argument If the data is not a valid QOI image
      */
-    QoiImage decode(ByteSpan data, bool rgbOnly = false) noexcept(false);
+    Image decode(ByteSpan data, bool rgbOnly = false) noexcept(false);
 
     template <CharLike Char>
-    inline QoiImage decode(std::span<const Char> data, bool rgbOnly = false) noexcept(false)
+    inline Image decode(std::span<const Char> data, bool rgbOnly = false) noexcept(false)
     {
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
         return decode(byteData, rgbOnly);

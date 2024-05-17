@@ -25,8 +25,8 @@ namespace fs = std::filesystem;
 
 using qoipp::ByteSpan;
 using qoipp::ByteVec;
+using qoipp::Image;
 using qoipp::ImageDesc;
-using qoipp::QoiImage;
 
 struct StbImage
 {
@@ -37,9 +37,9 @@ struct StbImage
     ImageDesc  m_desc;
 };
 
-struct Image
+struct ImageVar
 {
-    using Variant = std::variant<StbImage, QoiImage>;
+    using Variant = std::variant<StbImage, Image>;
 
     template <typename... Ts>
     struct Overloaded : Ts...
@@ -52,7 +52,7 @@ struct Image
         const auto tup = std::make_pair<ByteSpan, const ImageDesc&>;
         return std::visit(
             Overloaded{
-                [&](const QoiImage& d) { return tup(d.m_data, d.m_desc); },
+                [&](const Image& d) { return tup(d.m_data, d.m_desc); },
                 [&](const StbImage& d) {
                     auto [width, height, channels, _]{ d.m_desc };
                     const auto size = (width * height * static_cast<std::size_t>(channels));
@@ -100,7 +100,7 @@ ByteVec loadFile(const fs::path& filepath)
     return bytes;
 }
 
-Image readPng(const fs::path& filepath)
+ImageVar readPng(const fs::path& filepath)
 {
     auto  bytes = loadFile(filepath);
     int   width, height, channels;
@@ -131,7 +131,7 @@ Image readPng(const fs::path& filepath)
     } };
 }
 
-Image readQoi(const fs::path& filepath, bool rgbOnly)
+ImageVar readQoi(const fs::path& filepath, bool rgbOnly)
 {
     auto bytes   = loadFile(filepath);
     auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
@@ -141,7 +141,7 @@ Image readQoi(const fs::path& filepath, bool rgbOnly)
     return { decoded };
 }
 
-void writePng(const Image& image, const fs::path& filepath)
+void writePng(const ImageVar& image, const fs::path& filepath)
 {
     const auto& [data, desc] = image.get();
 
@@ -164,7 +164,7 @@ void writePng(const Image& image, const fs::path& filepath)
     };
 }
 
-void writeQoi(const Image& image, const fs::path& filepath)
+void writeQoi(const ImageVar& image, const fs::path& filepath)
 {
     auto [data, desc] = image.get();
 

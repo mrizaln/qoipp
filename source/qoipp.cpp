@@ -633,7 +633,7 @@ namespace qoipp
     }
 
     // TODO: implement
-    QoiImage decode(ByteSpan data, bool rgbOnly) noexcept(false)
+    Image decode(ByteSpan data, bool rgbOnly) noexcept(false)
     {
         if (data.size() == 0) {
             throw std::invalid_argument{ "Data is empty" };
