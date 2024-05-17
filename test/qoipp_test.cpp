@@ -3,14 +3,16 @@
 #include <boost/ut.hpp>
 #include <fmt/core.h>
 #include <fmt/color.h>
+#include <range/v3/view.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
-#include <ranges>
 #include <string>
+
+namespace rv = ranges::views;
 
 using i8  = std::int8_t;
 using i16 = std::int16_t;
@@ -40,9 +42,25 @@ using namespace ut::operators;
 ByteVec toBytes(std::initializer_list<u8> data)
 {
     ByteVec result(data.size());
-    for (auto i : std::views::iota(0u, data.size())) {
+    for (auto i : rv::iota(0u, data.size())) {
         result[i] = Byte(data.begin()[i]);
     }
+    return result;
+}
+
+ByteVec rgbOnly(ByteSpan data)
+{
+    if (data.size() % 4) {
+        throw std::invalid_argument("data size must be a multiple of 4");
+    }
+
+    ByteVec result;
+    result.reserve(data.size() / 4 * 3);
+
+    for (const auto& chunk : rv::chunk(data, 4)) {
+        result.insert(result.end(), chunk.begin(), chunk.begin() + 3);
+    }
+
     return result;
 }
 
@@ -53,10 +71,10 @@ std::string compare(ByteSpan lhs, ByteSpan rhs)
         "SHOULD BE EQUALS FOR ALL ELEMENTS:\nlhs size: {} | rhs size: {}\n", lhs.size(), rhs.size()
     );
 
-    for (auto i : std::views::iota(0u, std::min(lhs.size(), rhs.size()))) {
-        auto diff   = (u8)lhs[i] - (u8)rhs[i];
+    for (const auto& [left, right] : rv::zip(lhs, rhs)) {
+        auto diff   = (u8)left - (u8)right;
         auto color  = diff == 0 ? fmt::color::green_yellow : fmt::color::orange_red;
-        result     += fmt::format(fg(color), "{:#04x} - {:#04x} = {:#04x}\n", lhs[i], rhs[i], diff);
+        result     += fmt::format(fg(color), "{:#04x} - {:#04x} = {:#04x}\n", left, right, diff);
     }
 
     result += fmt::format(
@@ -86,15 +104,23 @@ ut::suite threeChannelImage = [] {
 #include "image_qoi_3.txt"
     });
 
-    "3-channel image encode test"_test = [&] {
+    "3-channel image encode"_test = [&] {
         const auto encoded = qoipp::encode(rawImage, desc);
         ut::expect(ut::that % encoded.size() == qoiImage.size());
         ut::expect(std::memcmp(encoded.data(), qoiImage.data(), qoiImage.size()) == 0_i)
             << compare(qoiImage, encoded);
     };
 
-    "3-channel image decode test"_test = [&] {
+    "3-channel image decode"_test = [&] {
         const auto [decoded, actualdesc] = qoipp::decode(qoiImage);
+        ut::expect(actualdesc == desc);
+        ut::expect(ut::that % decoded.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
+            << compare(rawImage, decoded);
+    };
+
+    "3-channel image decode rgbOnly flag enabled"_test = [&] {
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, true);
         ut::expect(actualdesc == desc);
         ut::expect(ut::that % decoded.size() == rawImage.size());
         ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
@@ -118,19 +144,32 @@ ut::suite fourChannelImage = [] {
 #include "image_qoi_4.txt"
     });
 
-    "4-channel image encode test"_test = [&] {
+    "4-channel image encode"_test = [&] {
         const auto encoded = qoipp::encode(rawImage, desc);
         ut::expect(encoded.size() == qoiImage.size());
         ut::expect(std::memcmp(encoded.data(), qoiImage.data(), qoiImage.size()) == 0_i)
             << compare(qoiImage, encoded);
     };
 
-    "4-channel image decode test"_test = [&] {
+    "4-channel image decode"_test = [&] {
         const auto [decoded, actualdesc] = qoipp::decode(qoiImage);
         ut::expect(actualdesc == desc);
         ut::expect(ut::that % decoded.size() == rawImage.size());
         ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
             << compare(rawImage, decoded);
+    };
+
+    "4-channel image decode rgbOnly flag enabled"_test = [&] {
+        auto rgbImage = rgbOnly(rawImage);
+        auto rgbDesc  = qoipp::ImageDesc{
+            desc.m_width, desc.m_height, qoipp::Channels::RGB, desc.m_colorspace
+        };
+
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, true);
+        ut::expect(actualdesc == rgbDesc);
+        ut::expect(ut::that % decoded.size() == rgbImage.size());
+        ut::expect(std::memcmp(decoded.data(), rgbImage.data(), rgbImage.size()) == 0_i)
+            << compare(rgbImage, decoded);
     };
 };
 

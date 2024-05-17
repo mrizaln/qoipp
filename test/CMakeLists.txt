@@ -11,9 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(fmt REQUIRED)
 find_package(ut REQUIRED)
-find_package(stb REQUIRED)
-
-include(cmake/fetched-lib.cmake) # emits qoi target
+find_package(range-v3 REQUIRED)
 
 # The library
 add_subdirectory(lib/qoipp)
@@ -24,7 +22,7 @@ endif()
 enable_testing()
 
 add_executable(qoipp_test qoipp_test.cpp)
-target_link_libraries(qoipp_test PRIVATE fmt::fmt Boost::ut stb::stb qoipp qoi)
+target_link_libraries(qoipp_test PRIVATE fmt::fmt Boost::ut range-v3::range-v3 qoipp)
 target_compile_options(qoipp_test PRIVATE -Wall -Wextra -Wconversion)
 target_compile_options(qoipp_test PRIVATE -fsanitize=address,leak,undefined)
 target_link_options(qoipp_test PRIVATE -fsanitize=address,leak,undefined)
