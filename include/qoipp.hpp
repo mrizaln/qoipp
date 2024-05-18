@@ -2,6 +2,7 @@
 #define QOIPP_HPP_O4A387W5ER6OW7E
 
 #include <cstddef>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <vector>
@@ -49,7 +50,7 @@ namespace qoipp
      * @param data The data to read the header from
      * @return std::optional<ImageDesc> The description of the image if it is a valid QOI image
      */
-    std::optional<ImageDesc> readHeader(ByteSpan data);
+    std::optional<ImageDesc> readHeader(ByteSpan data) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image
@@ -84,6 +85,38 @@ namespace qoipp
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data.data()), data.size() };
         return decode(byteData, rgbOnly);
     }
+
+    /**
+     * @brief Read the header of a QOI image from a file
+     * @param path The path to the file
+     * @return std::optional<ImageDesc> The description of the image (std::nullopt if it's invalid)
+     */
+    std::optional<ImageDesc> readHeaderFromFile(const std::filesystem::path& path) noexcept;
+
+    /**
+     * @brief Encode the given data into a QOI image and write it to a file
+     * @param path The path to the file
+     * @param data The data to encode
+     * @param desc The description of the image
+     * @param overwrite If true, the file will be overwritten if it already exists
+     * @throw std::invalid_argument If the file already exists and overwrite is false or if there is a
+     * mismatch between the data and the description
+     */
+    void encodeToFile(
+        const std::filesystem::path& path,
+        ByteSpan                     data,
+        ImageDesc                    desc,
+        bool                         overwrite = false
+    ) noexcept(false);
+
+    /**
+     * @brief Decode a QOI image from a file
+     *
+     * @param path The path to the file
+     * @return Image The decoded image
+     * @throw std::invalid_argument If the file is not exist or not a valid QOI image
+     */
+    Image decodeFromFile(const std::filesystem::path& path, bool rgbOnly = false) noexcept(false);
 }
 
 #endif /* end of include guard: QOIPP_HPP_O4A387W5ER6OW7E */

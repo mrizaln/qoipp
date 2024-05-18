@@ -8,6 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
+#include <fstream>
+#include <filesystem>
 #include <initializer_list>
 #include <string>
 
@@ -34,9 +37,17 @@ using Byte = std::byte;
 using qoipp::ByteSpan;
 using qoipp::ByteVec;
 
+namespace fs = std::filesystem;
 namespace ut = boost::ut;
+
 using namespace ut::literals;
 using namespace ut::operators;
+
+fs::path mktemp()
+{
+    auto name = std::tmpnam(nullptr);
+    return fs::temp_directory_path() / name;
+}
 
 ByteVec toBytes(std::initializer_list<u8> data)
 {
@@ -125,6 +136,57 @@ ut::suite threeChannelImage = [] {
         ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
             << compare(rawImage, decoded);
     };
+
+    "3-channel image encode to and decode from file"_test = [&] {
+        auto qoifile = mktemp();
+
+        ut::expect(ut::nothrow([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));
+        ut::expect(ut::throws([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));    // file exist
+
+        qoipp::Image decoded;
+        ut::expect(ut::nothrow([&] { decoded = qoipp::decodeFromFile(qoifile); }));
+        ut::expect(decoded.m_desc == desc);
+        ut::expect(ut::that % decoded.m_data.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.m_data.data(), rawImage.data(), rawImage.size()) == 0_i)
+            << compare(rawImage, decoded.m_data);
+
+        std::ofstream ofs{ qoifile, std::ios::trunc };
+        ut::expect(fs::is_empty(qoifile));
+
+        ut::expect(ut::throws([&] { qoipp::decodeFromFile(qoifile); })) << "Empty file should throw";
+        fs::remove(qoifile);
+        ut::expect(ut::throws([&] { qoipp::decodeFromFile(qoifile); })) << "Non-existent file should throw";
+        ut::expect(!fs::exists(qoifile)) << "File should not be created if it previously not exist";
+    };
+
+    "3-channel image header read"_test = [&] {
+        const auto header = qoipp::readHeader(qoiImage);
+        ut::expect(header.has_value()) << "Invalid header";
+        ut::expect(*header == desc);
+
+        const auto emptyHeader = qoipp::readHeader(ByteVec{});
+        ut::expect(!emptyHeader.has_value());
+
+        const auto invalidHeader = qoipp::readHeader(toBytes({ 0x00, 0x01, 0x02, 0x03 }));
+        ut::expect(!invalidHeader.has_value());
+    };
+
+    "3-channel image header read from file"_test = [&] {
+        const auto qoifile = mktemp();
+        ut::expect(ut::nothrow([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));
+
+        const auto header = qoipp::readHeaderFromFile(qoifile);
+        ut::expect(header.has_value()) << "Invalid header";
+        ut::expect(*header == desc);
+
+        std::ofstream ofs{ qoifile, std::ios::trunc };
+        ut::expect(fs::is_empty(qoifile));
+
+        const auto emptyHeader = qoipp::readHeaderFromFile(qoifile);
+        ut::expect(!emptyHeader.has_value());
+
+        fs::remove(qoifile);
+    };
 };
 
 ut::suite fourChannelImage = [] {
@@ -169,6 +231,57 @@ ut::suite fourChannelImage = [] {
         ut::expect(ut::that % decoded.size() == rgbImage.size());
         ut::expect(std::memcmp(decoded.data(), rgbImage.data(), rgbImage.size()) == 0_i)
             << compare(rgbImage, decoded);
+    };
+
+    "4-channel image encode to and decode from file"_test = [&] {
+        auto qoifile = mktemp();
+
+        ut::expect(ut::nothrow([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));
+        ut::expect(ut::throws([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));    // file exist
+
+        qoipp::Image decoded;
+        ut::expect(ut::nothrow([&] { decoded = qoipp::decodeFromFile(qoifile); }));
+        ut::expect(decoded.m_desc == desc);
+        ut::expect(ut::that % decoded.m_data.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.m_data.data(), rawImage.data(), rawImage.size()) == 0_i)
+            << compare(rawImage, decoded.m_data);
+
+        std::ofstream ofs{ qoifile, std::ios::trunc };
+        ut::expect(fs::is_empty(qoifile));
+
+        ut::expect(ut::throws([&] { qoipp::decodeFromFile(qoifile); })) << "Empty file should throw";
+        fs::remove(qoifile);
+        ut::expect(ut::throws([&] { qoipp::decodeFromFile(qoifile); })) << "Non-existent file should throw";
+        ut::expect(!fs::exists(qoifile)) << "File should not be created if it previously not exist";
+    };
+
+    "4-channel image header read"_test = [&] {
+        const auto header = qoipp::readHeader(qoiImage);
+        ut::expect(header.has_value()) << "Invalid header";
+        ut::expect(*header == desc);
+
+        const auto emptyHeader = qoipp::readHeader(ByteVec{});
+        ut::expect(!emptyHeader.has_value());
+
+        const auto invalidHeader = qoipp::readHeader(toBytes({ 0x00, 0x01, 0x02, 0x03 }));
+        ut::expect(!invalidHeader.has_value());
+    };
+
+    "4-channel image header read from file"_test = [&] {
+        const auto qoifile = mktemp();
+        ut::expect(ut::nothrow([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));
+
+        const auto header = qoipp::readHeaderFromFile(qoifile);
+        ut::expect(header.has_value()) << "Invalid header";
+        ut::expect(*header == desc);
+
+        std::ofstream ofs{ qoifile, std::ios::trunc };
+        ut::expect(fs::is_empty(qoifile));
+
+        const auto emptyHeader = qoipp::readHeaderFromFile(qoifile);
+        ut::expect(!emptyHeader.has_value());
+
+        fs::remove(qoifile);
     };
 };
 

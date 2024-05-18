@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -554,7 +556,7 @@ namespace qoipp::impl
 
 namespace qoipp
 {
-    std::optional<ImageDesc> readHeader(ByteSpan data)
+    std::optional<ImageDesc> readHeader(ByteSpan data) noexcept
     {
         if (data.size() < constants::headerSize) {
             return std::nullopt;
@@ -664,5 +666,73 @@ namespace qoipp
                 .m_desc = desc,
             };
         }
+    }
+
+    std::optional<ImageDesc> readHeaderFromFile(const std::filesystem::path& path) noexcept
+    {
+        namespace fs = std::filesystem;
+
+        if (!fs::exists(path) || fs::file_size(path) < constants::headerSize || !fs::is_regular_file(path)) {
+            return std::nullopt;
+        }
+
+        std::ifstream file{ path, std::ios::binary };
+        if (!file.is_open()) {
+            return std::nullopt;
+        }
+
+        ByteVec data(constants::headerSize);
+        file.read(reinterpret_cast<char*>(data.data()), constants::headerSize);
+
+        return readHeader(data);
+    }
+
+    void encodeToFile(
+        const std::filesystem::path& path,
+        std::span<const Byte>        data,
+        ImageDesc                    desc,
+        bool                         overwrite
+    ) noexcept(false)
+    {
+        namespace fs = std::filesystem;
+
+        if (fs::exists(path) && !overwrite) {
+            throw std::invalid_argument{ "File already exists and overwrite is false" };
+        }
+
+        if (fs::exists(path) && !fs::is_regular_file(path)) {
+            throw std::invalid_argument{ "Path is not a regular file, cannot overwrite" };
+        }
+
+        auto encodedData = encode(data, desc);
+
+        std::ofstream file{ path, std::ios::binary | std::ios::trunc };
+        if (!file.is_open()) {
+            throw std::invalid_argument{ "Could not open file for writing" };
+        }
+
+        file.write(
+            reinterpret_cast<const char*>(encodedData.data()),
+            static_cast<std::streamsize>(encodedData.size())
+        );
+    }
+
+    Image decodeFromFile(const std::filesystem::path& path, bool rgbOnly) noexcept(false)
+    {
+        namespace fs = std::filesystem;
+
+        if (!fs::exists(path) || !fs::is_regular_file(path)) {
+            throw std::invalid_argument{ "Path does not exist or is not a regular file" };
+        }
+
+        std::ifstream file{ path, std::ios::binary };
+        if (!file.is_open()) {
+            throw std::invalid_argument{ "Could not open file for reading" };
+        }
+
+        ByteVec data(fs::file_size(path));
+        file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+
+        return decode(data, rgbOnly);
     }
 }
