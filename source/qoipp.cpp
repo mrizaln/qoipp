@@ -93,10 +93,10 @@ namespace qoipp
 
     struct Pixel
     {
-        u8 m_r;
-        u8 m_g;
-        u8 m_b;
-        u8 m_a = 0xFF;
+        u8 m_r = 0x00;
+        u8 m_g = 0x00;
+        u8 m_b = 0x00;
+        u8 m_a = 0x00;
 
         constexpr auto operator<=>(const Pixel&) const = default;
     };
@@ -373,10 +373,9 @@ namespace qoipp::impl
         const usize maxSize = width * height * (static_cast<usize>(Chan) + 1) + constants::headerSize
                             + constants::endMarker.size();
 
-        DataChunkArray chunks{ maxSize };    // the encoded data
-        RunningArray   seenPixels = {};
+        DataChunkArray chunks{ maxSize };    // the encoded data goes here
+        RunningArray   seenPixels{};
 
-        // TODO: correct colorspace field
         chunks.push(data::QoiHeader{
             .m_width      = width,
             .m_height     = height,
@@ -475,6 +474,8 @@ namespace qoipp::impl
 
         const auto        get = [&](usize index) -> u8 { return std::to_integer<u8>(data[index]); };
         PixelWriter<Dest> write{ decodedData };
+
+        seenPixels[hash(prevPixel) % constants::runningArraySize] = prevPixel;
 
         usize chunksSize = data.size() - constants::headerSize - constants::endMarker.size();
         for (usize pixelIndex = 0, dataIndex = constants::headerSize;

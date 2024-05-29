@@ -1,7 +1,15 @@
 #include <qoipp.hpp>
+#define QOI_IMPLEMENTATION
+#include <qoi.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_LINEAR
+#include <stb_image.h>
 
 #include <boost/ut.hpp>
 #include <fmt/core.h>
+#include <fmt/std.h>
 #include <fmt/color.h>
 #include <range/v3/view.hpp>
 
@@ -43,6 +51,14 @@ namespace ut = boost::ut;
 using namespace ut::literals;
 using namespace ut::operators;
 
+using qoipp::Image;
+
+static inline const fs::path g_testImageDir = fs::current_path() / "qoi_test_images";
+
+// ----------------
+// helper functions
+// ----------------
+
 fs::path mktemp()
 {
     auto name = std::tmpnam(nullptr);
@@ -74,6 +90,85 @@ ByteVec rgbOnly(ByteSpan data)
     return result;
 }
 
+Image loadImageRaw(const fs::path& file)
+{
+    int   width, height, channels;
+    auto* data = stbi_load(file.c_str(), &width, &height, &channels, 0);
+    if (data == nullptr) {
+        throw std::runtime_error{ fmt::format("Error decoding file '{}' (stb)", file) };
+    }
+
+    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+    auto  size    = static_cast<size_t>(width * height * channels);
+
+    Image image{
+        .m_data = { bytePtr, bytePtr + size },
+        .m_desc = {
+            .m_width      = static_cast<unsigned int>(width),
+            .m_height     = static_cast<unsigned int>(height),
+            .m_channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .m_colorspace = qoipp::Colorspace::sRGB,
+        },
+    };
+
+    stbi_image_free(data);
+    return image;
+}
+
+Image qoiEncode(const Image& image)
+{
+    qoi_desc desc{
+        .width      = static_cast<unsigned int>(image.m_desc.m_width),
+        .height     = static_cast<unsigned int>(image.m_desc.m_height),
+        .channels   = (unsigned char)(image.m_desc.m_channels == qoipp::Channels::RGB ? 3 : 4),
+        .colorspace = (unsigned char)(image.m_desc.m_colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB
+                                                                                           : QOI_LINEAR),
+    };
+
+    int   len;
+    auto* data = qoi_encode(image.m_data.data(), &desc, &len);
+
+    if (!data) {
+        throw std::runtime_error{ "Error encoding image (qoi)" };
+    }
+
+    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+
+    Image result = {
+        .m_data = ByteVec{ bytePtr, bytePtr + len },
+        .m_desc = image.m_desc,
+    };
+
+    QOI_FREE(data);
+    return result;
+}
+
+Image qoiDecode(const Image& image)
+{
+    qoi_desc desc;
+    auto*    data = qoi_decode(image.m_data.data(), (int)image.m_data.size(), &desc, 0);
+
+    if (!data) {
+        throw std::runtime_error{ "Error decoding image (qoi)" };
+    }
+
+    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+    auto  size    = static_cast<size_t>(desc.width * desc.height * desc.channels);
+
+    Image result = {
+        .m_data = { bytePtr, bytePtr + size },
+        .m_desc = {
+            .m_width      = desc.width,
+            .m_height     = desc.height,
+            .m_channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .m_colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
+        },
+    };
+
+    QOI_FREE(data);
+    return result;
+}
+
 // too bad ut doesn't have something like this that can show diff between two spans
 std::string compare(ByteSpan lhs, ByteSpan rhs)
 {
@@ -81,20 +176,30 @@ std::string compare(ByteSpan lhs, ByteSpan rhs)
         "SHOULD BE EQUALS FOR ALL ELEMENTS:\nlhs size: {} | rhs size: {}\n", lhs.size(), rhs.size()
     );
 
-    for (const auto& [left, right] : rv::zip(lhs, rhs)) {
-        auto diff   = (u8)left - (u8)right;
-        auto color  = diff == 0 ? fmt::color::green_yellow : fmt::color::orange_red;
-        result     += fmt::format(fg(color), "{:#04x} - {:#04x} = {:#04x}\n", left, right, diff);
+    int diffCount = 0;
+    for (const auto& [i, pair] : rv::zip(lhs, rhs) | rv::enumerate) {
+        auto [left, right] = pair;
+        auto diff          = (i32)left - (i32)right;
+        if (diff != 0) {
+            ++diffCount;
+            const auto color = fmt::color::orange_red;
+            result += fmt::format(fg(color), "{}: {:#04x} - {:#04x} = {:#04x}\n", i, left, right, diff);
+        }
     }
 
-    result += fmt::format(
-        "{} more from {}",
-        lhs.size() > rhs.size() ? lhs.size() - rhs.size() : rhs.size() - lhs.size(),
-        lhs.size() > rhs.size() ? "lhs" : "rhs"
-    );
+    auto sizeDiff = (i32)lhs.size() - (i32)rhs.size();
+    auto min      = std::min(lhs.size(), rhs.size());
+
+    result += "Summary\n";
+    result += fmt::format("\t- {} bytes difference in size\n", sizeDiff);
+    result += fmt::format("\t- {} difference found ({}%)", diffCount, (f32)diffCount * 100.0F / (f32)min);
 
     return result;
 }
+
+// ----------------------
+// tests starts from here
+// ----------------------
 
 ut::suite threeChannelImage = [] {
     constexpr qoipp::ImageDesc desc{
@@ -138,7 +243,7 @@ ut::suite threeChannelImage = [] {
     };
 
     "3-channel image encode to and decode from file"_test = [&] {
-        auto qoifile = mktemp();
+        const auto qoifile = mktemp();
 
         ut::expect(ut::nothrow([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));
         ut::expect(ut::throws([&] { qoipp::encodeToFile(qoifile, rawImage, desc, false); }));    // file exist
@@ -283,6 +388,29 @@ ut::suite fourChannelImage = [] {
 
         fs::remove(qoifile);
     };
+};
+
+ut::suite testingOnRealImage = [] {
+    if (!fs::exists(g_testImageDir)) {
+        return;
+    }
+
+    for (auto entry : fs::directory_iterator{ g_testImageDir }) {
+        if (entry.path().extension() != ".png") {
+            continue;
+        }
+
+        "png images round trip test compared to reference"_test = [&] {
+            const auto image      = loadImageRaw(entry.path());
+            const auto qoiImage   = qoiEncode(image);
+            const auto qoippImage = qoipp::encode(image.m_data, image.m_desc);
+
+            ut::expect(ut::that % qoiImage.m_data.size() == qoippImage.size());
+            ut::expect(qoiImage.m_desc == image.m_desc);
+            ut::expect(std::memcmp(qoiImage.m_data.data(), qoippImage.data(), qoippImage.size()) == 0_i)
+                << compare(qoiImage.m_data, qoippImage);
+        };
+    }
 };
 
 int main()
