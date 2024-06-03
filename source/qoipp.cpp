@@ -15,16 +15,6 @@
 #include <utility>
 #include <vector>
 
-#if defined(_MSC_VER)
-#    define QOIPP_ALWAYS_INLINE [[msvc::forceinline]]
-#elif defined(__GNUC__)
-#    define QOIPP_ALWAYS_INLINE [[gnu::always_inline]]
-#elif defined(__clang__)
-#    define QOIPP_ALWAYS_INLINE [[clang::always_inline]]
-#else
-#    define QOIPP_ALWAYS_INLINE
-#endif
-
 namespace sv = std::views;
 
 // utils ana aliases
@@ -137,7 +127,7 @@ namespace qoipp::data
     template <typename T>
     concept DataChunkVec = DataChunk<T, ByteVec>;
 
-    QOIPP_ALWAYS_INLINE inline void write32(ByteVec& vec, usize& index, u32 value) noexcept
+    inline void write32(ByteVec& vec, usize& index, u32 value) noexcept
     {
         vec[index++] = static_cast<Byte>((value >> 24) & 0xFF);
         vec[index++] = static_cast<Byte>((value >> 16) & 0xFF);
@@ -154,7 +144,7 @@ namespace qoipp::data
         u8  m_channels;
         u8  m_colorspace;
 
-        QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+        void write(ByteVec& vec, usize& index) const noexcept
         {
             for (char c : m_magic) {
                 vec[index++] = static_cast<Byte>(c);
@@ -171,7 +161,7 @@ namespace qoipp::data
 
     struct EndMarker
     {
-        QOIPP_ALWAYS_INLINE static void write(ByteVec& vec, usize& index) noexcept
+        static void write(ByteVec& vec, usize& index) noexcept
         {
             for (auto byte : constants::endMarker) {
                 vec[index++] = byte;
@@ -198,7 +188,7 @@ namespace qoipp::data
             u8 m_g = 0;
             u8 m_b = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RGB);
                 vec[index++] = static_cast<Byte>(m_r);
@@ -215,7 +205,7 @@ namespace qoipp::data
             u8 m_b = 0;
             u8 m_a = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RGBA);
                 vec[index++] = static_cast<Byte>(m_r);
@@ -230,7 +220,7 @@ namespace qoipp::data
         {
             u32 m_index = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_INDEX | m_index);
             }
@@ -243,7 +233,7 @@ namespace qoipp::data
             i8 m_dg = 0;
             i8 m_db = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 constexpr auto bias = constants::biasOpDiff;
 
@@ -260,7 +250,7 @@ namespace qoipp::data
             i8 m_dr_dg = 0;
             i8 m_db_dg = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 constexpr auto biasG  = constants::biasOpLumaG;
                 constexpr auto biasRB = constants::biasOpLumaRB;
@@ -275,7 +265,7 @@ namespace qoipp::data
         {
             i8 m_run = 0;
 
-            QOIPP_ALWAYS_INLINE void write(ByteVec& vec, usize& index) const noexcept
+            void write(ByteVec& vec, usize& index) const noexcept
             {
                 vec[index++] = static_cast<Byte>(OP_RUN | (m_run + constants::biasOpRun));
             }
@@ -285,14 +275,14 @@ namespace qoipp::data
         template <typename T>
         concept Op = AnyOf<T, Rgb, Rgba, Index, Diff, Luma, Run>;
 
-        QOIPP_ALWAYS_INLINE inline bool shouldDiff(i8 dr, i8 dg, i8 db) noexcept
+        inline bool shouldDiff(i8 dr, i8 dg, i8 db) noexcept
         {
             return dr >= constants::minDiff && dr <= constants::maxDiff    //
                 && dg >= constants::minDiff && dg <= constants::maxDiff    //
                 && db >= constants::minDiff && db <= constants::maxDiff;
         }
 
-        QOIPP_ALWAYS_INLINE inline bool shouldLuma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
+        inline bool shouldLuma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
         {
             return dr_dg >= constants::minLumaRB && dr_dg <= constants::maxLumaRB    //
                 && db_dg >= constants::minLumaRB && db_dg <= constants::maxLumaRB    //
@@ -315,7 +305,7 @@ namespace qoipp::impl
 
         template <typename T>
             requires(data::op::Op<T> or AnyOf<T, data::QoiHeader, data::EndMarker>)
-        QOIPP_ALWAYS_INLINE void push(T&& t) noexcept
+        void push(T&& t) noexcept
         {
             t.write(m_bytes, m_index);
         }
@@ -348,7 +338,7 @@ namespace qoipp::impl
     };
 
     template <Channels Chan>
-    QOIPP_ALWAYS_INLINE inline void getPixel(std::span<const Byte> data, Pixel& pixel, usize index) noexcept
+    inline void getPixel(std::span<const Byte> data, Pixel& pixel, usize index) noexcept
     {
         const usize dataIndex = index * static_cast<u32>(Chan);
 
@@ -360,7 +350,7 @@ namespace qoipp::impl
         }
     }
 
-    QOIPP_ALWAYS_INLINE inline usize hash(const Pixel& pixel)
+    inline usize hash(const Pixel& pixel)
     {
         const auto& [r, g, b, a] = pixel;
         return (r * 3 + g * 5 + b * 7 + a * 11);
