@@ -12,6 +12,7 @@
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
 #include <fmt/std.h>
+#include <fmt/color.h>
 
 #include <chrono>
 #include <exception>
@@ -29,11 +30,13 @@ namespace lib
 {
     enum class Lib
     {
+        none,
         qoi,
         qoipp
     };
 
-    std::map<Lib, std::string_view> m_names = {
+    std::map<Lib, std::string_view> names = {
+        { Lib::none, "none" },
         { Lib::qoi, "qoi" },
         { Lib::qoipp, "qoipp" },
     };
@@ -63,6 +66,17 @@ struct DecodeResult
     Duration m_time;
 };
 
+auto descString(const qoipp::ImageDesc& desc)
+{
+    return fmt::format(
+        "{}x{} ({}|{})",
+        desc.m_width,
+        desc.m_height,
+        fmt::underlying(desc.m_channels),
+        fmt::underlying(desc.m_colorspace)
+    );
+}
+
 struct Options
 {
     bool         m_warmup     = true;
@@ -89,15 +103,15 @@ struct Options
 
     void print()
     {
-        fmt::print("Options:\n");
-        fmt::print("\t- runs      : {}\n", m_runs);
-        fmt::print("\t- warmup    : {}\n", m_warmup);
-        fmt::print("\t- verify    : {}\n", m_verify);
-        fmt::print("\t- reference : {}\n", m_reference);
-        fmt::print("\t- encode    : {}\n", m_encode);
-        fmt::print("\t- decode    : {}\n", m_decode);
-        fmt::print("\t- recurse   : {}\n", m_recurse);
-        fmt::print("\t- onlytotals: {}\n", m_onlyTotals);
+        fmt::println("Options:");
+        fmt::println("\t- runs      : {}", m_runs);
+        fmt::println("\t- warmup    : {}", m_warmup);
+        fmt::println("\t- verify    : {}", m_verify);
+        fmt::println("\t- reference : {}", m_reference);
+        fmt::println("\t- encode    : {}", m_encode);
+        fmt::println("\t- decode    : {}", m_decode);
+        fmt::println("\t- recurse   : {}", m_recurse);
+        fmt::println("\t- onlytotals: {}", m_onlyTotals);
     }
 };
 
@@ -110,11 +124,11 @@ struct BenchmarkResult
         std::size_t m_encodedSize = 0;
     };
 
+    qoipp::ImageDesc m_desc    = {};
     fs::path         m_file    = {};
     std::size_t      m_rawSize = 0;
-    qoipp::ImageDesc m_desc;
 
-    std::map<lib::Lib, LibInfo> m_libsInfo;
+    std::map<lib::Lib, LibInfo> m_libsInfo = {};
 
     void print() const
     {
@@ -143,8 +157,8 @@ struct BenchmarkResult
                 Printed{
                     .m_totalEncodeTime = toMillis(info.m_encodeTime).count(),
                     .m_totalDecodeTime = toMillis(info.m_decodeTime).count(),
-                    .m_pixelsPerEncode = pixelCount / toMicros(info.m_encodeTime).count(),
-                    .m_pixelsPerDecode = pixelCount / toMicros(info.m_decodeTime).count(),
+                    .m_pixelsPerEncode = (float)pixelCount / toMicros(info.m_encodeTime).count(),
+                    .m_pixelsPerDecode = (float)pixelCount / toMicros(info.m_decodeTime).count(),
                     .m_encodedSizeKiB  = info.m_encodedSize / 1000,
                     .m_encodeSizeRatio = (float)info.m_encodedSize / (float)m_rawSize,
                 }
@@ -165,36 +179,58 @@ struct BenchmarkResult
             return;
         }
 
-        fmt::println("{:->88}", "");    // 92 chars wide separator
+        fmt::println("{:->110}", "");
 
         fmt::println(
-            "| {:^8} | {:^8} | {:^8} | {:^12} | {:^12} | {:^10} | {:^8} |",    // 92 chars wide
+            "| {:^8} | {:^8} | {:^8} | {:^12} | {:^12} | {:^6} | {:^6} | {:^10} | {:^8} |",    // 110
             "",
             "enc (ms)",
             "dec (ms)",
             "px/enc (/us)",
             "px/dec (/us)",
+            "enc t+",
+            "dec t+",
             "size (KiB)",
             "ratio"
         );
 
-        fmt::println("{:->88}", "");    // 92 chars wide separator
+        fmt::println("{:->110}", "");
+
+        auto getCodecRatio = [&](const Printed& info) -> std::pair<int, int> {
+            if (printed.contains(lib::Lib::qoi)) {
+                auto qoi     = printed[lib::Lib::qoi];
+                auto qoiEnc  = qoi.m_totalEncodeTime;
+                auto qoiDec  = qoi.m_totalDecodeTime;
+                auto infoEnc = info.m_totalEncodeTime;
+                auto infoDec = info.m_totalDecodeTime;
+                return { (infoEnc - qoiEnc) / qoiEnc * 100, (infoDec - qoiDec) / qoiDec * 100 };
+            } else {
+                return { 0, 0 };
+            }
+        };
+
+        // clang-format off
+        //                                | name  | enc      | dec      | enc/px    | dec/px    | enc%    | dec%    | size   | ratio      |
+        constexpr std::string_view fmt = "| {:<8} | {:>8.3f} | {:>8.3f} | {:>12.3f} | {:>12.3f} | {:>+5}% | {:>+5}% | {:>10} | {:>6.1f} % |";
+        // clang-format on
 
         for (const auto& [lib, info] : printed) {
+            auto [encRatio, decRatio] = getCodecRatio(info);
             fmt::println(
-                // name  | enc       | dec       | enc/pix   | dec/pix   | size   | ratio
-                "| {:<8} | {:>8.3f} | {:>8.3f} | {:>12.3f} | {:>12.3f} | {:>10} | {:>6.1f} % |",
-                lib::m_names[lib],
+                fmt,
+                lib::names[lib],
                 info.m_totalEncodeTime,
                 info.m_totalDecodeTime,
                 info.m_pixelsPerEncode,
                 info.m_pixelsPerDecode,
+                fmt::styled(encRatio, fmt::bg(encRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
+                fmt::styled(decRatio, fmt::bg(decRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
                 info.m_encodedSizeKiB,
                 info.m_encodeSizeRatio * 100.0
             );
         }
 
-        fmt::println("{:->88}", "");    // 92 chars wide separator
+        fmt::println("{:->110}", "");
     }
 };
 
@@ -324,7 +360,7 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
             requires(std::same_as<T, RawImage> or std::same_as<T, QoiImage>)
         {
             if (leftImage.m_data != rightImage.m_data || leftImage.m_desc != rightImage.m_desc) {
-                fmt::println("Verification failed for {} [skipped]", file);
+                fmt::println("\t\tVerification failed for {} [skipped]", file);
                 return false;
             }
             return true;
@@ -383,9 +419,9 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
     // the benchmark starts here
 
     BenchmarkResult result = {
+        .m_desc    = qoiImage.m_desc,
         .m_file    = file,
         .m_rawSize = rawImage.m_data.size(),
-        .m_desc    = qoiImage.m_desc,
     };
 
     if (opt.m_encode) {
@@ -416,7 +452,7 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
     std::vector<BenchmarkResult> results;
 
     if (opt.m_recurse) {
-        fmt::println(">> Benchmarking {} (recurse)", path / "**/*.png");
+        fmt::println(">> Benchmarking {} (recurse)...", path / "**/*.png");
 
         for (const auto& path : fs::recursive_directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
@@ -424,7 +460,7 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
             }
         }
     } else {
-        fmt::println(">> Benchmarking {}", path / "*.png");
+        fmt::println(">> Benchmarking {}...", path / "*.png");
 
         for (const auto& path : fs::directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
@@ -432,6 +468,8 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
             }
         }
     }
+
+    fmt::println("\t>> Benchmarking '{}' done!", path);
 
     return results;
 }
