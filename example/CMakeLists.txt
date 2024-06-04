@@ -15,13 +15,21 @@ find_package(range-v3 REQUIRED)
 find_package(PerlinNoise REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 
-include(cmake/fetched-lib.cmake)  # emits qoi
+include(cmake/fetched-lib.cmake) # emits: qoi, qoixx
 
 target_compile_features(range-v3::range-v3 INTERFACE cxx_std_20)
 
 add_subdirectory(lib/qoipp) # emits qoipp target
 
-set(DEPS CLI11::CLI11 fmt::fmt stb::stb range-v3::range-v3 siv::PerlinNoise  qoipp qoi)
+set(DEPS
+    CLI11::CLI11
+    fmt::fmt
+    stb::stb
+    range-v3::range-v3
+    siv::PerlinNoise
+    qoipp
+    qoi
+    qoixx)
 set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
 
 # ~~~
@@ -39,3 +47,10 @@ endfunction()
 create_executable(qoigen)
 create_executable(qoiconv)
 create_executable(qoibench)
+
+# run fuzz on clang only
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  create_executable(qoifuzz)
+  target_compile_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
+  target_link_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
+endif()
