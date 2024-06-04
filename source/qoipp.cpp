@@ -83,13 +83,15 @@ namespace qoipp
 
     struct Pixel
     {
-        u8 m_r = 0x00;
-        u8 m_g = 0x00;
-        u8 m_b = 0x00;
-        u8 m_a = 0x00;
+        u8 m_r;
+        u8 m_g;
+        u8 m_b;
+        u8 m_a;
 
         constexpr auto operator<=>(const Pixel&) const = default;
     };
+
+    static_assert(std::is_trivial_v<Pixel>);
 }
 
 namespace qoipp::constants
@@ -328,7 +330,7 @@ namespace qoipp::impl
 
         void operator()(usize index, const Pixel& pixel) noexcept
         {
-            const usize dataIndex = index * static_cast<u32>(Chan);
+            const usize dataIndex = index * static_cast<usize>(Chan);
             if constexpr (Chan == Channels::RGB) {
                 std::memcpy(m_dest.data() + dataIndex, &pixel, 3);
             } else {
@@ -338,17 +340,25 @@ namespace qoipp::impl
     };
 
     template <Channels Chan>
-    inline void getPixel(std::span<const Byte> data, Pixel& pixel, usize index) noexcept
+    struct PixelReader
     {
-        const usize dataIndex = index * static_cast<u32>(Chan);
+        std::span<const Byte> m_data;
 
-        if constexpr (Chan == Channels::RGB) {
-            std::memcpy(&pixel, data.data() + dataIndex, 3);
-            pixel.m_a = 0xFF;
-        } else {
-            std::memcpy(&pixel, data.data() + dataIndex, 4);
+        void operator()(Pixel& pixel, usize index)
+        {
+            const usize dataIndex = index * static_cast<usize>(Chan);
+
+            pixel.m_r = static_cast<u8>(m_data[dataIndex + 0]);
+            pixel.m_g = static_cast<u8>(m_data[dataIndex + 1]);
+            pixel.m_b = static_cast<u8>(m_data[dataIndex + 2]);
+
+            if constexpr (Chan == Channels::RGBA) {
+                pixel.m_a = static_cast<u8>(m_data[dataIndex + 3]);
+            } else {
+                pixel.m_a = 0xFF;
+            }
         }
-    }
+    };
 
     inline usize hash(const Pixel& pixel)
     {
@@ -365,6 +375,7 @@ namespace qoipp::impl
 
         DataChunkArray chunks{ maxSize };    // the encoded data goes here
         RunningArray   seenPixels{};
+        seenPixels.fill({ 0x00, 0x00, 0x00, 0x00 });
 
         chunks.push(data::QoiHeader{
             .m_width      = width,
@@ -373,12 +384,14 @@ namespace qoipp::impl
             .m_colorspace = static_cast<u8>(srgb ? 0 : 1),
         });
 
+        PixelReader<Chan> reader{ data };
+
         auto prevPixel = constants::start;
         auto currPixel = constants::start;
         i32  run       = 0;
 
         for (const auto pixelIndex : sv::iota(0u, static_cast<usize>(width * height))) {
-            getPixel<Chan>(data, currPixel, pixelIndex);
+            reader(currPixel, pixelIndex);
 
             if (prevPixel == currPixel) {
                 run++;
@@ -404,42 +417,47 @@ namespace qoipp::impl
                 } else {
                     seenPixels[index] = currPixel;
 
-                    // OP_DIFF and OP_LUMA
-                    if (prevPixel.m_a == currPixel.m_a) {
-                        const i8 dr = currPixel.m_r - prevPixel.m_r;
-                        const i8 dg = currPixel.m_g - prevPixel.m_g;
-                        const i8 db = currPixel.m_b - prevPixel.m_b;
-
-                        const i8 dr_dg = dr - dg;
-                        const i8 db_dg = db - dg;
-
-                        if (data::op::shouldDiff(dr, dg, db)) {
-                            chunks.push(data::op::Diff{
-                                .m_dr = dr,
-                                .m_dg = dg,
-                                .m_db = db,
-                            });
-                        } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
-                            chunks.push(data::op::Luma{
-                                .m_dg    = dg,
-                                .m_dr_dg = dr_dg,
-                                .m_db_dg = db_dg,
-                            });
-                        } else {
-                            // OP_RGB
-                            chunks.push(data::op::Rgb{
+                    if constexpr (Chan == Channels::RGBA) {
+                        if (prevPixel.m_a != currPixel.m_a) {
+                            // OP_RGBA
+                            chunks.push(data::op::Rgba{
                                 .m_r = currPixel.m_r,
                                 .m_g = currPixel.m_g,
                                 .m_b = currPixel.m_b,
+                                .m_a = currPixel.m_a,
                             });
+
+                            prevPixel = currPixel;
+                            continue;
                         }
-                    } else if constexpr (Chan == Channels::RGBA) {
-                        // OP_RGBA
-                        chunks.push(data::op::Rgba{
+                    }
+
+                    // OP_DIFF and OP_LUMA
+                    const i8 dr = currPixel.m_r - prevPixel.m_r;
+                    const i8 dg = currPixel.m_g - prevPixel.m_g;
+                    const i8 db = currPixel.m_b - prevPixel.m_b;
+
+                    const i8 dr_dg = dr - dg;
+                    const i8 db_dg = db - dg;
+
+                    if (data::op::shouldDiff(dr, dg, db)) {
+                        chunks.push(data::op::Diff{
+                            .m_dr = dr,
+                            .m_dg = dg,
+                            .m_db = db,
+                        });
+                    } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
+                        chunks.push(data::op::Luma{
+                            .m_dg    = dg,
+                            .m_dr_dg = dr_dg,
+                            .m_db_dg = db_dg,
+                        });
+                    } else {
+                        // OP_RGB
+                        chunks.push(data::op::Rgb{
                             .m_r = currPixel.m_r,
                             .m_g = currPixel.m_g,
                             .m_b = currPixel.m_b,
-                            .m_a = currPixel.m_a,
                         });
                     }
                 }
@@ -459,8 +477,10 @@ namespace qoipp::impl
     {
         ByteVec decodedData(static_cast<usize>(width * height * static_cast<i32>(Dest)));
 
-        RunningArray seenPixels = {};
-        Pixel        prevPixel  = constants::start;
+        RunningArray seenPixels{};
+        seenPixels.fill({ 0x00, 0x00, 0x00, 0x00 });
+
+        Pixel prevPixel = constants::start;
 
         const auto        get = [&](usize index) -> u8 { return std::to_integer<u8>(data[index]); };
         PixelWriter<Dest> write{ decodedData };
