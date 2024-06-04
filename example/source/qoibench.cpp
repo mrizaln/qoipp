@@ -1,6 +1,8 @@
+#include <limits>
 #include <qoipp.hpp>
 #define QOI_IMPLEMENTATION
 #include <qoi.h>
+#include <qoixx.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -32,12 +34,14 @@ namespace lib
     {
         none,
         qoi,
+        qoixx,
         qoipp
     };
 
     std::map<Lib, std::string_view> names = {
         { Lib::none, "none" },
         { Lib::qoi, "qoi" },
+        { Lib::qoixx, "qoixx" },
         { Lib::qoipp, "qoipp" },
     };
 };
@@ -86,6 +90,7 @@ struct Options
     bool         m_decode     = true;
     bool         m_recurse    = true;
     bool         m_onlyTotals = false;
+    bool         m_color      = true;
     unsigned int m_runs       = 1;
 
     void configure(CLI::App& app)
@@ -98,6 +103,7 @@ struct Options
         app.add_flag("!--no-encode", m_encode, "Don't run encoders");
         app.add_flag("!--no-decode", m_decode, "Don't run decoders");
         app.add_flag("!--no-recurse", m_recurse, "Don't descend into directories");
+        app.add_flag("!--no-color", m_color, "Don't print with color");
         app.add_flag("--only-totals", m_onlyTotals, "Don't print individual image results");
     }
 
@@ -111,6 +117,7 @@ struct Options
         fmt::println("\t- encode    : {}", m_encode);
         fmt::println("\t- decode    : {}", m_decode);
         fmt::println("\t- recurse   : {}", m_recurse);
+        fmt::println("\t- color     : {}", m_color);
         fmt::println("\t- onlytotals: {}", m_onlyTotals);
     }
 };
@@ -130,7 +137,7 @@ struct BenchmarkResult
 
     std::map<lib::Lib, LibInfo> m_libsInfo = {};
 
-    void print() const
+    void print(bool color) const
     {
         using Lib     = lib::Lib;
         using Millis  = std::chrono::duration<float, std::milli>;
@@ -196,14 +203,23 @@ struct BenchmarkResult
 
         fmt::println("{:->110}", "");
 
-        auto getCodecRatio = [&](const Printed& info) -> std::pair<int, int> {
+        const auto getCodecRatio = [&](const Printed& info) -> std::pair<int, int> {
+            const auto percent = [](auto old, auto neww) { return (neww - old) / old * 100; };
+
             if (printed.contains(lib::Lib::qoi)) {
                 auto qoi     = printed[lib::Lib::qoi];
                 auto qoiEnc  = qoi.m_totalEncodeTime;
                 auto qoiDec  = qoi.m_totalDecodeTime;
                 auto infoEnc = info.m_totalEncodeTime;
                 auto infoDec = info.m_totalDecodeTime;
-                return { (infoEnc - qoiEnc) / qoiEnc * 100, (infoDec - qoiDec) / qoiDec * 100 };
+
+                if (qoiEnc <= std::numeric_limits<float>::epsilon()) {
+                    return { 0, percent(qoiDec, infoDec) };
+                } else if (qoiDec <= std::numeric_limits<float>::epsilon()) {
+                    return { percent(qoiEnc, infoEnc), 0 };
+                } else {
+                    return { percent(qoiEnc, infoEnc), percent(qoiDec, infoDec) };
+                }
             } else {
                 return { 0, 0 };
             }
@@ -216,18 +232,33 @@ struct BenchmarkResult
 
         for (const auto& [lib, info] : printed) {
             auto [encRatio, decRatio] = getCodecRatio(info);
-            fmt::println(
-                fmt,
-                lib::names[lib],
-                info.m_totalEncodeTime,
-                info.m_totalDecodeTime,
-                info.m_pixelsPerEncode,
-                info.m_pixelsPerDecode,
-                fmt::styled(encRatio, fmt::bg(encRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
-                fmt::styled(decRatio, fmt::bg(decRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
-                info.m_encodedSizeKiB,
-                info.m_encodeSizeRatio * 100.0
-            );
+            if (color) {
+                fmt::println(
+                    fmt,
+                    lib::names[lib],
+                    info.m_totalEncodeTime,
+                    info.m_totalDecodeTime,
+                    info.m_pixelsPerEncode,
+                    info.m_pixelsPerDecode,
+                    fmt::styled(encRatio, fmt::bg(encRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
+                    fmt::styled(decRatio, fmt::bg(decRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
+                    info.m_encodedSizeKiB,
+                    info.m_encodeSizeRatio * 100.0
+                );
+            } else {
+                fmt::println(
+                    fmt,
+                    lib::names[lib],
+                    info.m_totalEncodeTime,
+                    info.m_totalDecodeTime,
+                    info.m_pixelsPerEncode,
+                    info.m_pixelsPerDecode,
+                    encRatio,
+                    decRatio,
+                    info.m_encodedSizeKiB,
+                    info.m_encodeSizeRatio * 100.0
+                );
+            }
         }
 
         fmt::println("{:->110}", "");
@@ -322,6 +353,50 @@ DecodeResult qoiDecode(const QoiImage& image)
 
     QOI_FREE(data);
     return result;
+}
+
+EncodeResult qoixxEncode(const RawImage& image)
+{
+    using T = qoipp::ByteVec;
+
+    qoixx::qoi::desc desc = {
+        .width      = image.m_desc.m_width,
+        .height     = image.m_desc.m_height,
+        .channels   = std::uint8_t(image.m_desc.m_channels == qoipp::Channels::RGB ? 3 : 4),
+        .colorspace = image.m_desc.m_colorspace == qoipp::Colorspace::sRGB ? qoixx::qoi::colorspace::srgb
+                                                                           : qoixx::qoi::colorspace::linear,
+    };
+
+    auto timepoint = Clock::now();
+    auto encoded   = qoixx::qoi::encode<T>(image.m_data, desc);
+    auto duration  = Clock::now() - timepoint;
+
+    return {
+        .m_image = { encoded, image.m_desc },
+        .m_time  = duration,
+    };
+}
+
+EncodeResult qoixxDecode(const QoiImage& image)
+{
+    using T = qoipp::ByteVec;
+
+    auto timepoint       = Clock::now();
+    auto [encoded, desc] = qoixx::qoi::decode<T>(image.m_data);
+    auto duration        = Clock::now() - timepoint;
+
+    qoipp::ImageDesc qoippDesc = {
+        .m_width      = desc.width,
+        .m_height     = desc.height,
+        .m_channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+        .m_colorspace = desc.colorspace == qoixx::qoi::colorspace::srgb ? qoipp::Colorspace::sRGB
+                                                                        : qoipp::Colorspace::Linear,
+    };
+
+    return {
+        .m_image = { encoded, qoippDesc },
+        .m_time  = duration,
+    };
 }
 
 EncodeResult qoippEncode(const RawImage& image)
@@ -426,20 +501,26 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
 
     if (opt.m_encode) {
         auto [qoiTime, qoiSize]     = benchmarkImpl(qoiEncode, rawImage);
+        auto [qoixxTime, qoixxSize] = benchmarkImpl(qoixxEncode, rawImage);
         auto [qoippTime, qoippSize] = benchmarkImpl(qoippEncode, rawImage);
 
         result.m_libsInfo[lib::Lib::qoi].m_encodeTime  = qoiTime;
         result.m_libsInfo[lib::Lib::qoi].m_encodedSize = qoiSize;
+
+        result.m_libsInfo[lib::Lib::qoixx].m_encodeTime  = qoixxTime;
+        result.m_libsInfo[lib::Lib::qoixx].m_encodedSize = qoixxSize;
 
         result.m_libsInfo[lib::Lib::qoipp].m_encodeTime  = qoippTime;
         result.m_libsInfo[lib::Lib::qoipp].m_encodedSize = qoippSize;
     }
 
     if (opt.m_decode) {
-        auto [qoiTime, __]  = benchmarkImpl(qoiDecode, qoiImage);
-        auto [qoippTime, _] = benchmarkImpl(qoippDecode, qoiImage);
+        auto [qoiTime, _]     = benchmarkImpl(qoiDecode, qoiImage);
+        auto [qoixxTime, __]  = benchmarkImpl(qoixxDecode, qoiImage);
+        auto [qoippTime, ___] = benchmarkImpl(qoippDecode, qoiImage);
 
         result.m_libsInfo[lib::Lib::qoi].m_decodeTime   = qoiTime;
+        result.m_libsInfo[lib::Lib::qoixx].m_decodeTime = qoixxTime;
         result.m_libsInfo[lib::Lib::qoipp].m_decodeTime = qoippTime;
     }
 
@@ -456,7 +537,9 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
 
         for (const auto& path : fs::recursive_directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
-                results.push_back(benchmark(path, opt));
+                // results.push_back(benchmark(path, opt));
+                auto result = benchmark(path, opt);
+                result.print(opt.m_color);
             }
         }
     } else {
@@ -464,7 +547,9 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
 
         for (const auto& path : fs::directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
-                results.push_back(benchmark(path, opt));
+                // results.push_back(benchmark(path, opt));
+                auto result = benchmark(path, opt);
+                result.print(opt.m_color);
             }
         }
     }
@@ -503,7 +588,7 @@ try {
     auto results = benchmarkDirectory(dirpath, opt);
 
     for (const auto& result : results) {
-        result.print();
+        result.print(opt.m_color);
         fmt::println("");
     }
 
