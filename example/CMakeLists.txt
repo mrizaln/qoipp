@@ -20,16 +20,19 @@ include(cmake/fetched-lib.cmake) # emits: qoi, qoixx
 target_compile_features(range-v3::range-v3 INTERFACE cxx_std_20)
 
 add_subdirectory(lib/qoipp) # emits qoipp target
+add_subdirectory(lib/fpng) # emits fpng target
 
 set(DEPS
     CLI11::CLI11
     fmt::fmt
     stb::stb
+    fpng
     range-v3::range-v3
     siv::PerlinNoise
     qoipp
     qoi
-    qoixx)
+    qoixx
+)
 set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
 
 # ~~~
@@ -37,11 +40,11 @@ set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
 # set(COMPILE_FLAGS -fsanitize=address,leak,undefined)
 
 function(create_executable NAME)
-  add_executable(${NAME} source/${NAME}.cpp)
-  target_include_directories(${NAME} PRIVATE source)
-  target_link_libraries(${NAME} PRIVATE ${DEPS})
-  target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
-  target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
+    add_executable(${NAME} source/${NAME}.cpp)
+    target_include_directories(${NAME} PRIVATE source)
+    target_link_libraries(${NAME} PRIVATE ${DEPS})
+    target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
+    target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
 endfunction()
 
 create_executable(qoigen)
@@ -50,7 +53,7 @@ create_executable(qoibench)
 
 # run fuzz on clang only
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  create_executable(qoifuzz)
-  target_compile_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
-  target_link_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
+    create_executable(qoifuzz)
+    target_compile_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
+    target_link_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
 endif()

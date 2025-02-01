@@ -15,7 +15,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(qoixx)
 
 add_library(qoi INTERFACE)
-target_include_directories(qoi INTERFACE ${qoi_SOURCE_DIR})
+target_include_directories(qoi SYSTEM INTERFACE ${qoi_SOURCE_DIR})
 
 add_library(qoixx INTERFACE)
-target_include_directories(qoixx INTERFACE ${qoixx_SOURCE_DIR}/include)
+target_include_directories(qoixx SYSTEM INTERFACE ${qoixx_SOURCE_DIR}/include)
