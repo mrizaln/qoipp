@@ -105,16 +105,39 @@ namespace qoipp
      * @brief Decode the given QOI image
      *
      * @param data The QOI image to decode
-     * @param rgbOnly If true, only the RGB channels will be extracted
+     * @param target The target channels to extract; if std::nullopt, the original channels will be used
      * @return Image The decoded image
      * @throw std::invalid_argument If the data is not a valid QOI image
+     *
+     * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
-    Image decode(ByteSpan data, bool rgbOnly = false) noexcept(false);
+    Image decode(
+        ByteSpan                data,
+        std::optional<Channels> target         = std::nullopt,
+        bool                    flipVertically = false
+    ) noexcept(false);
 
-    inline Image decode(const void* data, std::size_t size, bool rgbOnly = false) noexcept(false)
+    /**
+     * @brief Decode the given data into a QOI image
+     *
+     * @param data The data to encode
+     * @param size The size of the data
+     * @param target The target channels to extract; if std::nullopt, the original channels will be used
+     * @param flipVertically If true, the image will be flip vertically
+     * @return Image The decoded image
+     * @throw std::invalid_argument If the data is not a valid QOI image
+     *
+     * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
+     */
+    inline Image decode(
+        const void*             data,
+        std::size_t             size,
+        std::optional<Channels> target         = std::nullopt,
+        bool                    flipVertically = false
+    ) noexcept(false)
     {
         auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data), size };
-        return decode(byteData, rgbOnly);
+        return decode(byteData, target, flipVertically);
     }
 
     /**
@@ -144,10 +167,17 @@ namespace qoipp
      * @brief Decode a QOI image from a file
      *
      * @param path The path to the file
+     * @param target The target channels to extract; if std::nullopt, the original channels will be used
      * @return Image The decoded image
      * @throw std::invalid_argument If the file is not exist or not a valid QOI image
+     *
+     * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
-    Image decodeFromFile(const std::filesystem::path& path, bool rgbOnly = false) noexcept(false);
+    Image decodeFromFile(
+        const std::filesystem::path& path,
+        std::optional<Channels>      target         = std::nullopt,
+        bool                         flipVertically = false
+    ) noexcept(false);
 }
 
 #endif /* end of include guard: QOIPP_HPP_O4A387W5ER6OW7E */

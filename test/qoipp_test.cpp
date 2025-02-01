@@ -234,8 +234,8 @@ ut::suite threeChannelImage = [] {
             << compare(rawImage, decoded);
     };
 
-    "3-channel image decode rgbOnly flag enabled"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, true);
+    "3-channel image decode wants RGB only"_test = [&] {
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, qoipp::Channels::RGB);
         ut::expect(actualdesc == desc);
         ut::expect(ut::that % decoded.size() == rawImage.size());
         ut::expect(std::memcmp(decoded.data(), rawImage.data(), rawImage.size()) == 0_i)
@@ -325,13 +325,13 @@ ut::suite fourChannelImage = [] {
             << compare(rawImage, decoded);
     };
 
-    "4-channel image decode rgbOnly flag enabled"_test = [&] {
+    "4-channel image decode wants RGB only"_test = [&] {
         auto rgbImage = rgbOnly(rawImage);
         auto rgbDesc  = qoipp::ImageDesc{
             desc.m_width, desc.m_height, qoipp::Channels::RGB, desc.m_colorspace
         };
 
-        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, true);
+        const auto [decoded, actualdesc] = qoipp::decode(qoiImage, qoipp::Channels::RGB);
         ut::expect(actualdesc == rgbDesc);
         ut::expect(ut::that % decoded.size() == rgbImage.size());
         ut::expect(std::memcmp(decoded.data(), rgbImage.data(), rgbImage.size()) == 0_i)
