@@ -14,6 +14,8 @@ find_package(stb REQUIRED)
 find_package(range-v3 REQUIRED)
 find_package(PerlinNoise REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
+find_package(glad CONFIG REQUIRED)
 
 include(cmake/fetched-lib.cmake) # emits: qoi, qoixx
 
@@ -39,21 +41,36 @@ set(COMPILE_FLAGS -Wall -Wextra -Wconversion -Wswitch-enum)
 # set(LINK_FLAGS -fsanitize=address,leak,undefined)
 # set(COMPILE_FLAGS -fsanitize=address,leak,undefined)
 
-function(create_executable NAME)
-    add_executable(${NAME} source/${NAME}.cpp)
-    target_include_directories(${NAME} PRIVATE source)
-    target_link_libraries(${NAME} PRIVATE ${DEPS})
-    target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
-    target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
+function(create_executable)
+    cmake_parse_arguments(ARGS "" "NAME" "DEPS" ${ARGN})
+
+    add_executable(${ARGS_NAME} source/${ARGS_NAME}.cpp)
+    target_include_directories(${ARGS_NAME} PRIVATE source)
+    target_link_libraries(${ARGS_NAME} PRIVATE ${ARGS_DEPS})
+    target_compile_options(${ARGS_NAME} PRIVATE ${COMPILE_FLAGS})
+    target_link_options(${ARGS_NAME} PRIVATE ${LINK_FLAGS})
 endfunction()
 
-create_executable(qoigen)
-create_executable(qoiconv)
-create_executable(qoibench)
+create_executable(
+    NAME qoigen
+    DEPS CLI11::CLI11 fmt::fmt siv::PerlinNoise range-v3::range-v3 qoipp
+)
+create_executable(
+    NAME qoiconv
+    DEPS CLI11::CLI11 fmt::fmt stb::stb qoipp
+)
+create_executable(
+    NAME qoibench
+    DEPS CLI11::CLI11 fmt::fmt stb::stb fpng qoi qoixx qoipp
+)
+create_executable(
+    NAME qoiswap
+    DEPS CLI11::CLI11 fmt::fmt qoipp
+)
 
 # run fuzz on clang only
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    create_executable(qoifuzz)
+    create_executable(NAME qoifuzz DEPS qoipp)
     target_compile_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
     target_link_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
 endif()
