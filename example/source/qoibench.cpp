@@ -1,4 +1,3 @@
-#include <limits>
 #include <qoipp.hpp>
 #define QOI_IMPLEMENTATION
 #include <qoi.h>
@@ -20,6 +19,7 @@
 #include <chrono>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <utility>
 
