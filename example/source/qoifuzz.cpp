@@ -8,7 +8,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     auto span  = ByteSpan{ bytes, size };
 
     try {
-        auto [decoded, error] = qoipp::decode(span);
+        auto [decoded, desc] = qoipp::decode(span);
     } catch (const std::exception& e) {
         /* ignore exception */
     }
