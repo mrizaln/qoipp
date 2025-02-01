@@ -136,7 +136,7 @@ ImageVar readQoi(const fs::path& filepath, bool rgbOnly)
     auto bytes   = loadFile(filepath);
     auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
     {
-        return qoipp::decode(bytes, rgbOnly);
+        return qoipp::decode(bytes, rgbOnly ? std::optional{ qoipp::Channels::RGB } : std::nullopt);
     };
     return { decoded };
 }

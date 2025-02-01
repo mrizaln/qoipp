@@ -522,7 +522,7 @@ namespace qoipp::impl
     }
 
     template <Channels Src, Channels Dest = Src>
-    ByteVec decode(std::span<const Byte> data, usize width, usize height) noexcept(false)
+    ByteVec decode(std::span<const Byte> data, usize width, usize height, bool flipVertically) noexcept(false)
     {
         ByteVec decodedData(static_cast<usize>(width * height * static_cast<i32>(Dest)));
 
@@ -608,6 +608,16 @@ namespace qoipp::impl
             write(pixelIndex, currPixel);
             seenPixels[hash(currPixel) % constants::runningArraySize] = currPixel;
             prevPixel                                                 = currPixel;
+        }
+
+        if (flipVertically) {
+            auto linesize = width * static_cast<usize>(Dest);
+            for (auto y : sv::iota(0u, height / 2)) {
+                auto* line1 = decodedData.data() + y * linesize;
+                auto* line2 = decodedData.data() + (height - y - 1) * linesize;
+
+                std::swap_ranges(line1, line1 + linesize, line2);
+            }
         }
 
         return decodedData;
@@ -710,7 +720,7 @@ namespace qoipp
         }
     }
 
-    Image decode(ByteSpan data, bool rgbOnly) noexcept(false)
+    Image decode(ByteSpan data, std::optional<Channels> target, bool flipVertically) noexcept(false)
     {
         if (data.size() == 0) {
             throw std::invalid_argument{ "Data is empty" };
@@ -724,20 +734,30 @@ namespace qoipp
             }
         }();
 
-        if (desc.m_channels == Channels::RGB) {
+        const auto& [width, height, channels, colorspace] = desc;
+
+        auto want = target.value_or(channels);
+
+        if (channels == Channels::RGBA and want == Channels::RGBA) {
             return {
-                .m_data = impl::decode<Channels::RGB>(data, desc.m_width, desc.m_height),
+                .m_data = impl::decode<Channels::RGBA, Channels::RGBA>(data, width, height, flipVertically),
                 .m_desc = desc,
             };
-        } else if (rgbOnly) {
+        } else if (channels == Channels::RGB and want == Channels::RGB) {
+            return {
+                .m_data = impl::decode<Channels::RGB, Channels::RGB>(data, width, height, flipVertically),
+                .m_desc = desc,
+            };
+        } else if (channels == Channels::RGBA and want == Channels::RGB) {
             desc.m_channels = Channels::RGB;
             return {
-                .m_data = impl::decode<Channels::RGBA, Channels::RGB>(data, desc.m_width, desc.m_height),
+                .m_data = impl::decode<Channels::RGBA, Channels::RGB>(data, width, height, flipVertically),
                 .m_desc = desc,
             };
         } else {
+            desc.m_channels = Channels::RGBA;
             return {
-                .m_data = impl::decode<Channels::RGBA>(data, desc.m_width, desc.m_height),
+                .m_data = impl::decode<Channels::RGB, Channels::RGBA>(data, width, height, flipVertically),
                 .m_desc = desc,
             };
         }
@@ -792,7 +812,11 @@ namespace qoipp
         );
     }
 
-    Image decodeFromFile(const std::filesystem::path& path, bool rgbOnly) noexcept(false)
+    Image decodeFromFile(
+        const std::filesystem::path& path,
+        std::optional<Channels>      target,
+        bool                         flipVertically
+    ) noexcept(false)
     {
         namespace fs = std::filesystem;
 
@@ -808,6 +832,6 @@ namespace qoipp
         ByteVec data(fs::file_size(path));
         file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
 
-        return decode(data, rgbOnly);
+        return decode(data, target, flipVertically);
     }
 }
