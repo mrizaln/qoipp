@@ -14,12 +14,11 @@
 #include <random>
 #include <type_traits>
 
-namespace rr = ranges::views;
 namespace rv = ranges::views;
 namespace fs = std::filesystem;
 
-using qoipp::ByteVec;
 using qoipp::Channels;
+using qoipp::Vec;
 
 template <typename T>
 using Pair = std::pair<T, T>;
@@ -38,9 +37,9 @@ T random(T min, T max)
 
 struct PerlinInfo
 {
-    siv::PerlinNoise m_noise;
-    float            m_freq;
-    int              m_octave;
+    siv::PerlinNoise noise;
+    float            freq;
+    int              octave;
 };
 
 const std::map<std::string, Channels> CHANNELS_STR{
@@ -65,25 +64,25 @@ public:
         fmt::println("\nImageGen initialized with current settings:");
         for (const auto& [i, info] : rv::enumerate(m_perlinInfo)) {
             fmt::print("PerlinInfo #{}:\n", i);
-            fmt::print("  Frequency: {}\n", info.m_freq);
-            fmt::print("  Octave   : {}\n", info.m_octave);
+            fmt::print("  Frequency: {}\n", info.freq);
+            fmt::print("  Octave   : {}\n", info.octave);
         }
         fmt::println("");
     }
 
-    ByteVec generate(unsigned int width, unsigned int height)
+    Vec generate(unsigned int width, unsigned int height)
     {
 
         const auto pixelSize = width * height;
         const auto channels  = static_cast<std::size_t>(m_channels);
 
-        ByteVec result;
+        Vec result;
         result.reserve(pixelSize * channels);
 
         std::vector<float> xBias(channels);
         std::vector<float> yBias(channels);
 
-        for (auto&& [x, y] : rr::zip(xBias, yBias)) {
+        for (auto&& [x, y] : rv::zip(xBias, yBias)) {
             x = random<float>(-1.0f, 1.0f);
             y = random<float>(-1.0f, 1.0f);
         };
@@ -96,16 +95,16 @@ public:
             std::vector<float> fy(channels);
 
             for (auto&& [fx, fy, info] : rv::zip(fx, fy, m_perlinInfo)) {
-                fx = static_cast<float>(x) * info.m_freq / static_cast<float>(width);
-                fy = static_cast<float>(y) * info.m_freq / static_cast<float>(height);
+                fx = static_cast<float>(x) * info.freq / static_cast<float>(width);
+                fy = static_cast<float>(y) * info.freq / static_cast<float>(height);
             }
 
-            std::vector<std::byte> color(channels);
+            std::vector<std::uint8_t> color(channels);
 
             for (const auto& [j, info] : rv::enumerate(m_perlinInfo)) {
-                color[j] = static_cast<std::byte>(static_cast<unsigned char>(
-                    info.m_noise.octave2D_01(fx[j] + xBias[j], fy[j] + yBias[j], info.m_octave) * 0xFF
-                ));
+                color[j] = static_cast<std::uint8_t>(
+                    info.noise.octave2D_01(fx[j] + xBias[j], fy[j] + yBias[j], info.octave) * 0xFF
+                );
             }
 
             result.insert(result.end(), color.begin(), color.end());
@@ -121,9 +120,9 @@ private:
     static PerlinInfo randomPerlinInfo()
     {
         return {
-            .m_noise  = siv::PerlinNoise{ siv::PerlinNoise::seed_type(std::time(nullptr)) },
-            .m_freq   = random(s_freqRange.first, s_freqRange.second),
-            .m_octave = random(s_octaveRange.first, s_octaveRange.second),
+            .noise  = siv::PerlinNoise{ siv::PerlinNoise::seed_type(std::time(nullptr)) },
+            .freq   = random(s_freqRange.first, s_freqRange.second),
+            .octave = random(s_octaveRange.first, s_octaveRange.second),
         };
     }
 };
@@ -152,10 +151,10 @@ int main(int argc, char* argv[])
     CLI11_PARSE(app, argc, argv);
 
     qoipp::ImageDesc desc{
-        .m_width      = width,
-        .m_height     = height,
-        .m_channels   = channels,
-        .m_colorspace = qoipp::Colorspace::sRGB,
+        .width      = width,
+        .height     = height,
+        .channels   = channels,
+        .colorspace = qoipp::Colorspace::sRGB,
     };
 
     ImageGen imgGen{ channels };
@@ -163,7 +162,7 @@ int main(int argc, char* argv[])
     auto bytes = DO_TIME_MS ("Generate image")
     {
         fmt::println("Generating image...");
-        return imgGen.generate(desc.m_width, desc.m_height);
+        return imgGen.generate(desc.width, desc.height);
     };
 
     auto encoded = DO_TIME_MS ("Encode image")

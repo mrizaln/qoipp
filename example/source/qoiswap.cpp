@@ -40,17 +40,17 @@ int main(int argc, char** argv)
     // pipeline for the image (single pass only though).
     struct SwapChannels
     {
-        qoipp::Image& m_image;
+        qoipp::Image& image;
 
         qoipp::PixelRepr operator()(std::size_t index) const
         {
-            auto& [data, desc] = m_image;
-            auto idx           = index * static_cast<std::size_t>(desc.m_channels);
+            auto& [data, desc] = image;
+            auto idx           = index * static_cast<std::size_t>(desc.channels);
 
             auto r = data[idx + 0];
             auto g = data[idx + 1];
             auto b = data[idx + 2];
-            auto a = desc.m_channels == qoipp::Channels::RGBA ? data[idx + 3] : std::byte{ 0xFF };
+            auto a = desc.channels == qoipp::Channels::RGBA ? data[idx + 3] : std::uint8_t{ 0xFF };
 
             return { g, b, r, a };
         }
@@ -58,7 +58,7 @@ int main(int argc, char** argv)
 
     auto image    = qoipp::decodeFromFile(input);
     auto now      = std::chrono::steady_clock::now();
-    auto swapped  = qoipp::encodeFromFunction(SwapChannels{ image }, image.m_desc);
+    auto swapped  = qoipp::encodeFromFunction(SwapChannels{ image }, image.desc);
     auto duration = std::chrono::steady_clock::now() - now;
 
     auto out = std::fstream{ input, std::ios::out | std::ios::binary };

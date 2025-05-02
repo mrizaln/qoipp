@@ -23,18 +23,18 @@
 
 namespace fs = std::filesystem;
 
-using qoipp::ByteSpan;
-using qoipp::ByteVec;
 using qoipp::Image;
 using qoipp::ImageDesc;
+using qoipp::Span;
+using qoipp::Vec;
 
 struct StbImage
 {
     using Data       = unsigned char;
     using UniqueData = std::unique_ptr<Data, decltype([](Data* data) { stbi_image_free(data); })>;
 
-    UniqueData m_data;
-    ImageDesc  m_desc;
+    UniqueData data;
+    ImageDesc  desc;
 };
 
 struct ImageVar
@@ -47,19 +47,19 @@ struct ImageVar
         using Ts::operator()...;
     };
 
-    std::pair<ByteSpan, ImageDesc> get() const
+    std::pair<Span, ImageDesc> get() const
     {
-        const auto tup = std::make_pair<ByteSpan, const ImageDesc&>;
+        const auto tup = std::make_pair<Span, const ImageDesc&>;
         return std::visit(
             Overloaded{
-                [&](const Image& d) { return tup(d.m_data, d.m_desc); },
+                [&](const Image& d) { return tup(d.data, d.desc); },
                 [&](const StbImage& d) {
-                    auto [width, height, channels, _]{ d.m_desc };
+                    auto [width, height, channels, _]{ d.desc };
                     const auto size = (width * height * static_cast<std::size_t>(channels));
-                    return tup({ reinterpret_cast<std::byte*>(d.m_data.get()), size }, d.m_desc);
+                    return tup({ d.data.get(), size }, d.desc);
                 },
             },
-            m_value
+            value
         );
     }
 
@@ -74,7 +74,7 @@ struct ImageVar
         fmt::println("\tcolorspace: {}", colorspace == qoipp::Colorspace::sRGB ? "sRGB" : "Linear");
     }
 
-    Variant m_value;
+    Variant value;
 };
 
 enum class FileType
@@ -83,7 +83,7 @@ enum class FileType
     QOI
 };
 
-ByteVec loadFile(const fs::path& filepath)
+Vec loadFile(const fs::path& filepath)
 {
     std::ifstream file{ filepath, std::ios::binary };
     if (!file) {
@@ -91,7 +91,7 @@ ByteVec loadFile(const fs::path& filepath)
     }
 
     const auto size = fs::file_size(filepath);
-    ByteVec    bytes(size);
+    Vec        bytes(size);
 
     DO_TIME_MS ("Read from file") {
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
@@ -121,12 +121,12 @@ ImageVar readPng(const fs::path& filepath)
     }
 
     return { StbImage{
-        .m_data = StbImage::UniqueData{ data },
-        .m_desc = {
-            .m_width      = static_cast<unsigned int>(width),
-            .m_height     = static_cast<unsigned int>(height),
-            .m_channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-            .m_colorspace = qoipp::Colorspace::sRGB,    // dummy; unused
+        .data = StbImage::UniqueData{ data },
+        .desc = {
+            .width      = static_cast<unsigned int>(width),
+            .height     = static_cast<unsigned int>(height),
+            .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .colorspace = qoipp::Colorspace::sRGB,    // dummy; unused
         },
     } };
 }

@@ -10,8 +10,8 @@
 
 namespace qoipp
 {
-    using ByteVec  = std::vector<std::byte>;
-    using ByteSpan = std::span<const std::byte>;
+    using Vec  = std::vector<std::uint8_t>;
+    using Span = std::span<const std::uint8_t>;
 
     enum class Colorspace : int
     {
@@ -27,28 +27,28 @@ namespace qoipp
 
     struct PixelRepr
     {
-        std::byte m_r;
-        std::byte m_g;
-        std::byte m_b;
-        std::byte m_a;
+        std::uint8_t r;
+        std::uint8_t g;
+        std::uint8_t b;
+        std::uint8_t a;
 
         constexpr auto operator<=>(const PixelRepr&) const = default;
     };
 
     struct ImageDesc
     {
-        unsigned int m_width;
-        unsigned int m_height;
-        Channels     m_channels;
-        Colorspace   m_colorspace;
+        unsigned int width;
+        unsigned int height;
+        Channels     channels;
+        Colorspace   colorspace;
 
         constexpr auto operator<=>(const ImageDesc&) const = default;
     };
 
     struct Image
     {
-        ByteVec   m_data;
-        ImageDesc m_desc;
+        Vec       data;
+        ImageDesc desc;
     };
 
     using PixelGenFun = std::function<PixelRepr(std::size_t pixelIndex)>;
@@ -59,19 +59,19 @@ namespace qoipp
      * @param data The data to read the header from
      * @return std::optional<ImageDesc> The description of the image if it is a valid QOI image
      */
-    std::optional<ImageDesc> readHeader(ByteSpan data) noexcept;
+    std::optional<ImageDesc> readHeader(Span data) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image
      *
      * @param data The data to encode
      * @param desc The description of the image
-     * @return ByteVec The encoded image
+     * @return Vec The encoded image
      * @throw std::invalid_argument If there is a mismatch between the data and the description
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    ByteVec encode(ByteSpan data, ImageDesc desc) noexcept(false);
+    Vec encode(Span data, ImageDesc desc) noexcept(false);
 
     /**
      * @brief Encode the given data into a QOI image
@@ -79,13 +79,13 @@ namespace qoipp
      * @param data The data to encode
      * @param size The size of the data
      * @param desc The description of the image
-     * @return ByteVec The encoded image
+     * @return Vec The encoded image
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    inline ByteVec encode(const void* data, std::size_t size, ImageDesc desc) noexcept(false)
+    inline Vec encode(const void* data, std::size_t size, ImageDesc desc) noexcept(false)
     {
-        auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data), size };
+        auto byteData = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
         return encode(byteData, desc);
     }
 
@@ -94,12 +94,12 @@ namespace qoipp
      *
      * @param func The function to generate the data
      * @param desc The description of the image
-     * @return ByteVec The encoded image
+     * @return Vec The encoded image
      *
      * The function should return the pixel at the given location ((0, 0) is at the top-left corner) in the
      * format of RGBA8888 (the alpha channel is discarded if the ImageDesc specifies RGB channels only).
      */
-    ByteVec encodeFromFunction(PixelGenFun func, ImageDesc desc) noexcept(false);
+    Vec encodeFromFunction(PixelGenFun func, ImageDesc desc) noexcept(false);
 
     /**
      * @brief Decode the given QOI image
@@ -112,7 +112,7 @@ namespace qoipp
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
     Image decode(
-        ByteSpan                data,
+        Span                    data,
         std::optional<Channels> target         = std::nullopt,
         bool                    flipVertically = false
     ) noexcept(false);
@@ -136,7 +136,7 @@ namespace qoipp
         bool                    flipVertically = false
     ) noexcept(false)
     {
-        auto byteData = ByteSpan{ reinterpret_cast<const std::byte*>(data), size };
+        auto byteData = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
         return decode(byteData, target, flipVertically);
     }
 
@@ -158,7 +158,7 @@ namespace qoipp
      */
     void encodeToFile(
         const std::filesystem::path& path,
-        ByteSpan                     data,
+        Span                         data,
         ImageDesc                    desc,
         bool                         overwrite = false
     ) noexcept(false);

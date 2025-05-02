@@ -9,11 +9,9 @@
 #include <format>
 #include <fstream>
 #include <ranges>
-#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace sv = std::views;
 
@@ -36,24 +34,18 @@ namespace qoipp
     using f32 = float;
     using f64 = double;
 
-    using Byte = std::byte;
-
     template <usize N>
-    using ByteArr = std::array<Byte, N>;
-    using ByteVec = std::vector<Byte>;
+    using Arr = std::array<u8, N>;
 
     template <typename T, typename... Ts>
     concept AnyOf = (std::same_as<T, Ts> or ...);
 
-    template <typename T>
-    concept ByteRange = std::ranges::range<T> and std::same_as<std::ranges::range_value_t<T>, Byte>;
-
     template <typename T, usize N>
-    consteval ByteArr<N> toBytes(const T (&value)[N])
+    consteval Arr<N> toBytes(const T (&value)[N])
     {
-        ByteArr<N> result;
+        Arr<N> result;
         for (usize i : sv::iota(0u, N)) {
-            result[i] = static_cast<Byte>(value[i]);
+            result[i] = static_cast<u8>(value[i]);
         }
         return result;
     }
@@ -83,10 +75,10 @@ namespace qoipp
 
     struct Pixel
     {
-        u8 m_r;
-        u8 m_g;
-        u8 m_b;
-        u8 m_a;
+        u8 r;
+        u8 g;
+        u8 b;
+        u8 a;
 
         constexpr auto operator<=>(const Pixel&) const = default;
     };
@@ -102,9 +94,9 @@ namespace qoipp::constants
 {
     constexpr std::array<char, 4> magic = { 'q', 'o', 'i', 'f' };
 
-    constexpr usize      headerSize       = 14;
-    constexpr usize      runningArraySize = 64;
-    constexpr ByteArr<8> endMarker        = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
+    constexpr usize  headerSize       = 14;
+    constexpr usize  runningArraySize = 64;
+    constexpr Arr<8> endMarker        = toBytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
 
     constexpr i8 biasOpRun    = -1;
     constexpr i8 biasOpDiff   = 2;
@@ -131,40 +123,40 @@ namespace qoipp::data
     // clang-format on
 
     template <typename T>
-    concept DataChunkVec = DataChunk<T, ByteVec>;
+    concept DataChunkVec = DataChunk<T, Vec>;
 
-    inline usize writeMagic(ByteVec& vec, usize index) noexcept
+    inline usize writeMagic(Vec& vec, usize index) noexcept
     {
         for (char c : constants::magic) {
-            vec[index++] = static_cast<Byte>(c);
+            vec[index++] = static_cast<u8>(c);
         }
         return index;
     }
 
-    inline usize write32(ByteVec& vec, usize index, u32 value) noexcept
+    inline usize write32(Vec& vec, usize index, u32 value) noexcept
     {
-        vec[index + 0] = static_cast<Byte>((value >> 24) & 0xFF);
-        vec[index + 1] = static_cast<Byte>((value >> 16) & 0xFF);
-        vec[index + 2] = static_cast<Byte>((value >> 8) & 0xFF);
-        vec[index + 3] = static_cast<Byte>(value & 0xFF);
+        vec[index + 0] = static_cast<u8>((value >> 24) & 0xFF);
+        vec[index + 1] = static_cast<u8>((value >> 16) & 0xFF);
+        vec[index + 2] = static_cast<u8>((value >> 8) & 0xFF);
+        vec[index + 3] = static_cast<u8>(value & 0xFF);
         return index + 4;
     }
 
     struct QoiHeader
     {
-        u32 m_width;
-        u32 m_height;
-        u8  m_channels;
-        u8  m_colorspace;
+        u32 width;
+        u32 height;
+        u8  channels;
+        u8  colorspace;
 
-        usize write(ByteVec& vec, usize index) const noexcept
+        usize write(Vec& vec, usize index) const noexcept
         {
             index = writeMagic(vec, index);
-            index = write32(vec, index, m_width);
-            index = write32(vec, index, m_height);
+            index = write32(vec, index, width);
+            index = write32(vec, index, height);
 
-            vec[index + 0] = static_cast<Byte>(m_channels);
-            vec[index + 1] = static_cast<Byte>(m_colorspace);
+            vec[index + 0] = static_cast<u8>(channels);
+            vec[index + 1] = static_cast<u8>(colorspace);
 
             return index + 2;
         }
@@ -173,7 +165,7 @@ namespace qoipp::data
 
     struct EndMarker
     {
-        static usize write(ByteVec& vec, usize index) noexcept
+        static usize write(Vec& vec, usize index) noexcept
         {
             for (auto byte : constants::endMarker) {
                 vec[index++] = byte;
@@ -197,16 +189,16 @@ namespace qoipp::data
 
         struct Rgb
         {
-            u8 m_r = 0;
-            u8 m_g = 0;
-            u8 m_b = 0;
+            u8 r = 0;
+            u8 g = 0;
+            u8 b = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize index) const noexcept
             {
-                vec[index + 0] = static_cast<Byte>(OP_RGB);
-                vec[index + 1] = static_cast<Byte>(m_r);
-                vec[index + 2] = static_cast<Byte>(m_g);
-                vec[index + 3] = static_cast<Byte>(m_b);
+                vec[index + 0] = static_cast<u8>(OP_RGB);
+                vec[index + 1] = static_cast<u8>(r);
+                vec[index + 2] = static_cast<u8>(g);
+                vec[index + 3] = static_cast<u8>(b);
                 return index + 4;
             }
         };
@@ -214,18 +206,18 @@ namespace qoipp::data
 
         struct Rgba
         {
-            u8 m_r = 0;
-            u8 m_g = 0;
-            u8 m_b = 0;
-            u8 m_a = 0;
+            u8 r = 0;
+            u8 g = 0;
+            u8 b = 0;
+            u8 a = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize index) const noexcept
             {
-                vec[index + 0] = static_cast<Byte>(OP_RGBA);
-                vec[index + 1] = static_cast<Byte>(m_r);
-                vec[index + 2] = static_cast<Byte>(m_g);
-                vec[index + 3] = static_cast<Byte>(m_b);
-                vec[index + 4] = static_cast<Byte>(m_a);
+                vec[index + 0] = static_cast<u8>(OP_RGBA);
+                vec[index + 1] = static_cast<u8>(r);
+                vec[index + 2] = static_cast<u8>(g);
+                vec[index + 3] = static_cast<u8>(b);
+                vec[index + 4] = static_cast<u8>(a);
                 return index + 5;
             }
         };
@@ -233,28 +225,28 @@ namespace qoipp::data
 
         struct Index
         {
-            u32 m_index = 0;
+            u32 index = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize idx) const noexcept
             {
-                vec[index + 0] = static_cast<Byte>(OP_INDEX | m_index);
-                return index + 1;
+                vec[idx + 0] = static_cast<u8>(OP_INDEX | index);
+                return idx + 1;
             }
         };
         static_assert(DataChunkVec<Index>);
 
         struct Diff
         {
-            i8 m_dr = 0;
-            i8 m_dg = 0;
-            i8 m_db = 0;
+            i8 dr = 0;
+            i8 dg = 0;
+            i8 db = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize index) const noexcept
             {
                 constexpr auto bias = constants::biasOpDiff;
 
-                auto val       = OP_DIFF | (m_dr + bias) << 4 | (m_dg + bias) << 2 | (m_db + bias);
-                vec[index + 0] = static_cast<Byte>(val);
+                auto val       = OP_DIFF | (dr + bias) << 4 | (dg + bias) << 2 | (db + bias);
+                vec[index + 0] = static_cast<u8>(val);
 
                 return index + 1;
             }
@@ -263,17 +255,17 @@ namespace qoipp::data
 
         struct Luma
         {
-            i8 m_dg    = 0;
-            i8 m_dr_dg = 0;
-            i8 m_db_dg = 0;
+            i8 dg    = 0;
+            i8 dr_dg = 0;
+            i8 db_dg = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize index) const noexcept
             {
                 constexpr auto biasG  = constants::biasOpLumaG;
                 constexpr auto biasRB = constants::biasOpLumaRB;
 
-                vec[index + 0] = static_cast<Byte>(OP_LUMA | (m_dg + biasG));
-                vec[index + 1] = static_cast<Byte>((m_dr_dg + biasRB) << 4 | (m_db_dg + biasRB));
+                vec[index + 0] = static_cast<u8>(OP_LUMA | (dg + biasG));
+                vec[index + 1] = static_cast<u8>((dr_dg + biasRB) << 4 | (db_dg + biasRB));
 
                 return index + 2;
             }
@@ -282,11 +274,11 @@ namespace qoipp::data
 
         struct Run
         {
-            i8 m_run = 0;
+            i8 run = 0;
 
-            usize write(ByteVec& vec, usize index) const noexcept
+            usize write(Vec& vec, usize index) const noexcept
             {
-                vec[index + 0] = static_cast<Byte>(OP_RUN | (m_run + constants::biasOpRun));
+                vec[index + 0] = static_cast<u8>(OP_RUN | (run + constants::biasOpRun));
                 return index + 1;
             }
         };
@@ -330,29 +322,29 @@ namespace qoipp::impl
             m_index = t.write(m_bytes, m_index);
         }
 
-        ByteVec get() noexcept
+        Vec get() noexcept
         {
             m_bytes.resize(m_index);
             return std::exchange(m_bytes, {});
         }
 
     private:
-        ByteVec m_bytes;
-        usize   m_index = 0;
+        Vec   m_bytes;
+        usize m_index = 0;
     };
 
     template <Channels Chan>
     struct PixelWriter
     {
-        std::span<Byte> m_dest;
+        std::span<u8> dest;
 
         void operator()(usize index, const Pixel& pixel) noexcept
         {
             const usize dataIndex = index * static_cast<usize>(Chan);
             if constexpr (Chan == Channels::RGB) {
-                std::memcpy(m_dest.data() + dataIndex, &pixel, 3);
+                std::memcpy(dest.data() + dataIndex, &pixel, 3);
             } else {
-                std::memcpy(m_dest.data() + dataIndex, &pixel, 4);
+                std::memcpy(dest.data() + dataIndex, &pixel, 4);
             }
         }
     };
@@ -360,7 +352,7 @@ namespace qoipp::impl
     template <Channels Chan>
     struct SimplePixelReader
     {
-        std::span<const Byte> m_data;
+        std::span<const u8> data;
 
         Pixel read(usize index) const noexcept
         {
@@ -368,17 +360,17 @@ namespace qoipp::impl
 
             if constexpr (Chan == Channels::RGBA) {
                 return {
-                    .m_r = static_cast<u8>(m_data[dataIndex + 0]),
-                    .m_g = static_cast<u8>(m_data[dataIndex + 1]),
-                    .m_b = static_cast<u8>(m_data[dataIndex + 2]),
-                    .m_a = static_cast<u8>(m_data[dataIndex + 3]),
+                    .r = data[dataIndex + 0],
+                    .g = data[dataIndex + 1],
+                    .b = data[dataIndex + 2],
+                    .a = data[dataIndex + 3],
                 };
             } else {
                 return {
-                    .m_r = static_cast<u8>(m_data[dataIndex + 0]),
-                    .m_g = static_cast<u8>(m_data[dataIndex + 1]),
-                    .m_b = static_cast<u8>(m_data[dataIndex + 2]),
-                    .m_a = 0xFF,
+                    .r = data[dataIndex + 0],
+                    .g = data[dataIndex + 1],
+                    .b = data[dataIndex + 2],
+                    .a = 0xFF,
                 };
             }
         }
@@ -388,25 +380,25 @@ namespace qoipp::impl
     template <Channels Chan>
     struct FuncPixelReader
     {
-        PixelGenFun m_func;
-        u32         m_width;
+        PixelGenFun func;
+        u32         width;
 
         Pixel read(usize index) const noexcept
         {
-            auto repr = m_func(index);
+            auto repr = func(index);
             if constexpr (Chan == Channels::RGBA) {
                 return {
-                    .m_r = std::to_integer<u8>(repr.m_r),
-                    .m_g = std::to_integer<u8>(repr.m_g),
-                    .m_b = std::to_integer<u8>(repr.m_b),
-                    .m_a = std::to_integer<u8>(repr.m_a),
+                    .r = repr.r,
+                    .g = repr.g,
+                    .b = repr.b,
+                    .a = repr.a,
                 };
             } else {
                 return {
-                    .m_r = std::to_integer<u8>(repr.m_r),
-                    .m_g = std::to_integer<u8>(repr.m_g),
-                    .m_b = std::to_integer<u8>(repr.m_b),
-                    .m_a = 0xFF,
+                    .r = repr.r,
+                    .g = repr.g,
+                    .b = repr.b,
+                    .a = 0xFF,
                 };
             }
         }
@@ -419,7 +411,7 @@ namespace qoipp::impl
     }
 
     template <Channels Chan, template <Channels> typename Reader>
-    ByteVec encode(Reader<Chan> reader, u32 width, u32 height, bool srgb)
+    Vec encode(Reader<Chan> reader, u32 width, u32 height, bool srgb)
     {
         // worst possible scenario is when no data is compressed + header + endMarker + tag (rgb/rgba)
         const usize maxSize = width * height * (static_cast<usize>(Chan) + 1) + constants::headerSize
@@ -430,10 +422,10 @@ namespace qoipp::impl
         seenPixels.fill({ 0x00, 0x00, 0x00, 0x00 });
 
         chunks.push(data::QoiHeader{
-            .m_width      = width,
-            .m_height     = height,
-            .m_channels   = static_cast<u8>(Chan),
-            .m_colorspace = static_cast<u8>(srgb ? 0 : 1),
+            .width      = width,
+            .height     = height,
+            .channels   = static_cast<u8>(Chan),
+            .colorspace = static_cast<u8>(srgb ? 0 : 1),
         });
 
         auto prevPixel = constants::start;
@@ -449,13 +441,13 @@ namespace qoipp::impl
                 const bool runLimit  = run == constants::runLimit;
                 const bool lastPixel = pixelIndex == static_cast<usize>(width * height) - 1;
                 if (runLimit || lastPixel) {
-                    chunks.push(data::op::Run{ .m_run = static_cast<i8>(run) });
+                    chunks.push(data::op::Run{ .run = static_cast<i8>(run) });
                     run = 0;
                 }
             } else {
                 if (run > 0) {
                     // ends of OP_RUN
-                    chunks.push(data::op::Run{ .m_run = static_cast<i8>(run) });
+                    chunks.push(data::op::Run{ .run = static_cast<i8>(run) });
                     run = 0;
                 }
 
@@ -463,18 +455,18 @@ namespace qoipp::impl
 
                 // OP_INDEX
                 if (seenPixels[index] == currPixel) {
-                    chunks.push(data::op::Index{ .m_index = index });
+                    chunks.push(data::op::Index{ .index = index });
                 } else {
                     seenPixels[index] = currPixel;
 
                     if constexpr (Chan == Channels::RGBA) {
-                        if (prevPixel.m_a != currPixel.m_a) {
+                        if (prevPixel.a != currPixel.a) {
                             // OP_RGBA
                             chunks.push(data::op::Rgba{
-                                .m_r = currPixel.m_r,
-                                .m_g = currPixel.m_g,
-                                .m_b = currPixel.m_b,
-                                .m_a = currPixel.m_a,
+                                .r = currPixel.r,
+                                .g = currPixel.g,
+                                .b = currPixel.b,
+                                .a = currPixel.a,
                             });
 
                             prevPixel = currPixel;
@@ -483,31 +475,31 @@ namespace qoipp::impl
                     }
 
                     // OP_DIFF and OP_LUMA
-                    const i8 dr = currPixel.m_r - prevPixel.m_r;
-                    const i8 dg = currPixel.m_g - prevPixel.m_g;
-                    const i8 db = currPixel.m_b - prevPixel.m_b;
+                    const i8 dr = currPixel.r - prevPixel.r;
+                    const i8 dg = currPixel.g - prevPixel.g;
+                    const i8 db = currPixel.b - prevPixel.b;
 
                     const i8 dr_dg = dr - dg;
                     const i8 db_dg = db - dg;
 
                     if (data::op::shouldDiff(dr, dg, db)) {
                         chunks.push(data::op::Diff{
-                            .m_dr = dr,
-                            .m_dg = dg,
-                            .m_db = db,
+                            .dr = dr,
+                            .dg = dg,
+                            .db = db,
                         });
                     } else if (data::op::shouldLuma(dg, dr_dg, db_dg)) {
                         chunks.push(data::op::Luma{
-                            .m_dg    = dg,
-                            .m_dr_dg = dr_dg,
-                            .m_db_dg = db_dg,
+                            .dg    = dg,
+                            .dr_dg = dr_dg,
+                            .db_dg = db_dg,
                         });
                     } else {
                         // OP_RGB
                         chunks.push(data::op::Rgb{
-                            .m_r = currPixel.m_r,
-                            .m_g = currPixel.m_g,
-                            .m_b = currPixel.m_b,
+                            .r = currPixel.r,
+                            .g = currPixel.g,
+                            .b = currPixel.b,
                         });
                     }
                 }
@@ -522,18 +514,16 @@ namespace qoipp::impl
     }
 
     template <Channels Src, Channels Dest = Src>
-    ByteVec decode(std::span<const Byte> data, usize width, usize height, bool flipVertically) noexcept(false)
+    Vec decode(std::span<const u8> data, usize width, usize height, bool flipVertically) noexcept(false)
     {
-        ByteVec decodedData(static_cast<usize>(width * height * static_cast<i32>(Dest)));
+        Vec decodedData(static_cast<usize>(width * height * static_cast<i32>(Dest)));
 
         RunningArray seenPixels{};
         seenPixels.fill({ 0x00, 0x00, 0x00, 0x00 });
 
         Pixel prevPixel = constants::start;
 
-        const auto get = [&](usize index) -> u8 {
-            return index < data.size() ? std::to_integer<u8>(data[index]) : 0x00;
-        };
+        const auto        get = [&](usize index) -> u8 { return index < data.size() ? data[index] : 0x00; };
         PixelWriter<Dest> write{ decodedData };
 
         seenPixels[hash(prevPixel) % constants::runningArraySize] = prevPixel;
@@ -549,19 +539,19 @@ namespace qoipp::impl
             using T = data::op::Tag;
             switch (tag) {
             case T::OP_RGB: {
-                currPixel.m_r = get(dataIndex++);
-                currPixel.m_g = get(dataIndex++);
-                currPixel.m_b = get(dataIndex++);
+                currPixel.r = get(dataIndex++);
+                currPixel.g = get(dataIndex++);
+                currPixel.b = get(dataIndex++);
                 if constexpr (Src == Channels::RGBA) {
-                    currPixel.m_a = prevPixel.m_a;
+                    currPixel.a = prevPixel.a;
                 }
             } break;
             case T::OP_RGBA: {
-                currPixel.m_r = get(dataIndex++);
-                currPixel.m_g = get(dataIndex++);
-                currPixel.m_b = get(dataIndex++);
+                currPixel.r = get(dataIndex++);
+                currPixel.g = get(dataIndex++);
+                currPixel.b = get(dataIndex++);
                 if constexpr (Src == Channels::RGBA) {
-                    currPixel.m_a = get(dataIndex++);
+                    currPixel.a = get(dataIndex++);
                 }
             } break;
             default:
@@ -575,11 +565,11 @@ namespace qoipp::impl
                     const i8 dg = ((tag & 0b00001100) >> 2) - constants::biasOpDiff;
                     const i8 db = ((tag & 0b00000011)) - constants::biasOpDiff;
 
-                    currPixel.m_r = static_cast<u8>(dr + prevPixel.m_r);
-                    currPixel.m_g = static_cast<u8>(dg + prevPixel.m_g);
-                    currPixel.m_b = static_cast<u8>(db + prevPixel.m_b);
+                    currPixel.r = static_cast<u8>(dr + prevPixel.r);
+                    currPixel.g = static_cast<u8>(dg + prevPixel.g);
+                    currPixel.b = static_cast<u8>(db + prevPixel.b);
                     if constexpr (Src == Channels::RGBA) {
-                        currPixel.m_a = static_cast<u8>(prevPixel.m_a);
+                        currPixel.a = static_cast<u8>(prevPixel.a);
                     }
                 } break;
                 case T::OP_LUMA: {
@@ -589,11 +579,11 @@ namespace qoipp::impl
                     const u8 dr_dg = ((redBlue & 0b11110000) >> 4) - constants::biasOpLumaRB;
                     const u8 db_dg = (redBlue & 0b00001111) - constants::biasOpLumaRB;
 
-                    currPixel.m_r = static_cast<u8>(dg + dr_dg + prevPixel.m_r);
-                    currPixel.m_g = static_cast<u8>(dg + prevPixel.m_g);
-                    currPixel.m_b = static_cast<u8>(dg + db_dg + prevPixel.m_b);
+                    currPixel.r = static_cast<u8>(dg + dr_dg + prevPixel.r);
+                    currPixel.g = static_cast<u8>(dg + prevPixel.g);
+                    currPixel.b = static_cast<u8>(dg + db_dg + prevPixel.b);
                     if constexpr (Src == Channels::RGBA) {
-                        currPixel.m_a = static_cast<u8>(prevPixel.m_a);
+                        currPixel.a = static_cast<u8>(prevPixel.a);
                     }
                 } break;
                 case T::OP_RUN: {
@@ -632,7 +622,7 @@ namespace qoipp::impl
 
 namespace qoipp
 {
-    std::optional<ImageDesc> readHeader(ByteSpan data) noexcept
+    std::optional<ImageDesc> readHeader(Span data) noexcept
     {
         if (data.size() < constants::headerSize) {
             return std::nullopt;
@@ -653,18 +643,18 @@ namespace qoipp
         index += sizeof(u32);
         std::memcpy(&height, data.data() + index, sizeof(u32));
         index      += sizeof(u32);
-        channels    = std::to_integer<u8>(data[index++]);
-        colorspace  = std::to_integer<u8>(data[index++]);
+        channels    = data[index++];
+        colorspace  = data[index++];
 
         return ImageDesc{
-            .m_width      = fromBigEndian(width),
-            .m_height     = fromBigEndian(height),
-            .m_channels   = static_cast<Channels>(channels),
-            .m_colorspace = static_cast<Colorspace>(colorspace),
+            .width      = fromBigEndian(width),
+            .height     = fromBigEndian(height),
+            .channels   = static_cast<Channels>(channels),
+            .colorspace = static_cast<Colorspace>(colorspace),
         };
     }
 
-    ByteVec encode(std::span<const Byte> data, ImageDesc desc) noexcept(false)
+    Vec encode(std::span<const u8> data, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
         const auto maxSize = static_cast<usize>(width * height * static_cast<u32>(channels));
@@ -706,7 +696,7 @@ namespace qoipp
         }
     }
 
-    ByteVec encodeFromFunction(PixelGenFun func, ImageDesc desc) noexcept(false)
+    Vec encodeFromFunction(PixelGenFun func, ImageDesc desc) noexcept(false)
     {
         const auto [width, height, channels, colorspace] = desc;
 
@@ -726,7 +716,7 @@ namespace qoipp
         }
     }
 
-    Image decode(ByteSpan data, std::optional<Channels> target, bool flipVertically) noexcept(false)
+    Image decode(Span data, std::optional<Channels> target, bool flipVertically) noexcept(false)
     {
         if (data.size() == 0) {
             throw std::invalid_argument{ "Data is empty" };
@@ -746,25 +736,25 @@ namespace qoipp
 
         if (channels == Channels::RGBA and want == Channels::RGBA) {
             return {
-                .m_data = impl::decode<Channels::RGBA, Channels::RGBA>(data, width, height, flipVertically),
-                .m_desc = desc,
+                .data = impl::decode<Channels::RGBA, Channels::RGBA>(data, width, height, flipVertically),
+                .desc = desc,
             };
         } else if (channels == Channels::RGB and want == Channels::RGB) {
             return {
-                .m_data = impl::decode<Channels::RGB, Channels::RGB>(data, width, height, flipVertically),
-                .m_desc = desc,
+                .data = impl::decode<Channels::RGB, Channels::RGB>(data, width, height, flipVertically),
+                .desc = desc,
             };
         } else if (channels == Channels::RGBA and want == Channels::RGB) {
-            desc.m_channels = Channels::RGB;
+            desc.channels = Channels::RGB;
             return {
-                .m_data = impl::decode<Channels::RGBA, Channels::RGB>(data, width, height, flipVertically),
-                .m_desc = desc,
+                .data = impl::decode<Channels::RGBA, Channels::RGB>(data, width, height, flipVertically),
+                .desc = desc,
             };
         } else {
-            desc.m_channels = Channels::RGBA;
+            desc.channels = Channels::RGBA;
             return {
-                .m_data = impl::decode<Channels::RGB, Channels::RGBA>(data, width, height, flipVertically),
-                .m_desc = desc,
+                .data = impl::decode<Channels::RGB, Channels::RGBA>(data, width, height, flipVertically),
+                .desc = desc,
             };
         }
     }
@@ -782,7 +772,7 @@ namespace qoipp
             return std::nullopt;
         }
 
-        ByteVec data(constants::headerSize);
+        Vec data(constants::headerSize);
         file.read(reinterpret_cast<char*>(data.data()), constants::headerSize);
 
         return readHeader(data);
@@ -790,7 +780,7 @@ namespace qoipp
 
     void encodeToFile(
         const std::filesystem::path& path,
-        std::span<const Byte>        data,
+        std::span<const u8>          data,
         ImageDesc                    desc,
         bool                         overwrite
     ) noexcept(false)
@@ -835,7 +825,7 @@ namespace qoipp
             throw std::invalid_argument{ "Could not open file for reading" };
         }
 
-        ByteVec data(fs::file_size(path));
+        Vec data(fs::file_size(path));
         file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
 
         return decode(data, target, flipVertically);
