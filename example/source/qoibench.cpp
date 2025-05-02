@@ -98,7 +98,7 @@ struct DecodeResult
     Duration time;
 };
 
-auto descString(const qoipp::ImageDesc& desc)
+auto desc_string(const qoipp::ImageDesc& desc)
 {
     return fmt::format(
         "{}x{} ({}|{})",
@@ -111,17 +111,17 @@ auto descString(const qoipp::ImageDesc& desc)
 
 struct Options
 {
-    bool         warmup     = true;
-    bool         verify     = true;
-    bool         reference  = true;
-    bool         encode     = true;
-    bool         decode     = true;
-    bool         recurse    = true;
-    bool         onlyTotals = false;
-    bool         color      = true;
-    bool         stb        = true;
-    bool         fpng       = true;
-    unsigned int runs       = 1;
+    bool         warmup      = true;
+    bool         verify      = true;
+    bool         reference   = true;
+    bool         encode      = true;
+    bool         decode      = true;
+    bool         recurse     = true;
+    bool         only_totals = false;
+    bool         color       = true;
+    bool         stb         = true;
+    bool         fpng        = true;
+    unsigned int runs        = 1;
 
     void configure(CLI::App& app)
     {
@@ -136,7 +136,7 @@ struct Options
         app.add_flag("!--no-color", color, "Don't print with color");
         app.add_flag("!--no-stb", stb, "Don't benchmark stb");
         app.add_flag("!--no-fpng", fpng, "Don't benchmark fpng");
-        app.add_flag("--only-totals", onlyTotals, "Don't print individual image results");
+        app.add_flag("--only-totals", only_totals, "Don't print individual image results");
     }
 
     void print()
@@ -152,7 +152,7 @@ struct Options
         fmt::println("\t- color     : {}", color);
         fmt::println("\t- stb       : {}", stb);
         fmt::println("\t- fpng      : {}", fpng);
-        fmt::println("\t- onlytotals: {}", onlyTotals);
+        fmt::println("\t- onlytotals: {}", only_totals);
     }
 };
 
@@ -160,16 +160,16 @@ struct BenchmarkResult
 {
     struct LibInfo
     {
-        Duration    encodeTime  = {};
-        Duration    decodeTime  = {};
-        std::size_t encodedSize = 0;
+        Duration    encode_time  = {};
+        Duration    decode_time  = {};
+        std::size_t encoded_size = 0;
     };
 
-    qoipp::ImageDesc desc    = {};
-    fs::path         file    = {};
-    std::size_t      rawSize = 0;
+    qoipp::ImageDesc desc     = {};
+    fs::path         file     = {};
+    std::size_t      raw_size = 0;
 
-    std::map<lib::Lib, LibInfo> libsInfo = {};
+    std::map<lib::Lib, LibInfo> libs_info = {};
 
     void print_sep(const char* start, const char* end, const char* mid, const char* fill) const
     {
@@ -204,35 +204,36 @@ struct BenchmarkResult
 
     void print(bool color) const
     {
-        using Lib     = lib::Lib;
-        using Millis  = std::chrono::duration<float, std::milli>;
-        using Micros  = std::chrono::duration<float, std::micro>;
-        auto toMillis = std::chrono::duration_cast<Millis, Duration::rep, Duration::period>;
-        auto toMicros = std::chrono::duration_cast<Micros, Duration::rep, Duration::period>;
+        using Lib    = lib::Lib;
+        using Millis = std::chrono::duration<float, std::milli>;
+        using Micros = std::chrono::duration<float, std::micro>;
+
+        const auto to_millis = std::chrono::duration_cast<Millis, Duration::rep, Duration::period>;
+        const auto to_micros = std::chrono::duration_cast<Micros, Duration::rep, Duration::period>;
 
         struct Printed
         {
-            float       totalEncodeTime;
-            float       totalDecodeTime;
-            float       pixelsPerEncode;
-            float       pixelsPerDecode;
-            std::size_t encodedSizeKiB;
-            float       encodeSizeRatio;
+            float       total_encode_time;
+            float       total_decode_time;
+            float       pixels_per_encode;
+            float       pixels_per_decode;
+            std::size_t encode_size_KiB;
+            float       encode_size_ratio;
         };
 
-        auto pixelCount = desc.width * desc.height;
+        const auto pixel_count = desc.width * desc.height;
 
-        std::map<Lib, Printed> printed;
-        for (const auto& [lib, info] : libsInfo) {
+        auto printed = std::map<Lib, Printed>{};
+        for (const auto& [lib, info] : libs_info) {
             printed.emplace(
                 lib,
                 Printed{
-                    .totalEncodeTime = toMillis(info.encodeTime).count(),
-                    .totalDecodeTime = toMillis(info.decodeTime).count(),
-                    .pixelsPerEncode = (float)pixelCount / toMicros(info.encodeTime).count(),
-                    .pixelsPerDecode = (float)pixelCount / toMicros(info.decodeTime).count(),
-                    .encodedSizeKiB  = info.encodedSize / 1000,
-                    .encodeSizeRatio = (float)info.encodedSize / (float)rawSize,
+                    .total_encode_time = to_millis(info.encode_time).count(),
+                    .total_decode_time = to_millis(info.decode_time).count(),
+                    .pixels_per_encode = (float)pixel_count / to_micros(info.encode_time).count(),
+                    .pixels_per_decode = (float)pixel_count / to_micros(info.decode_time).count(),
+                    .encode_size_KiB   = info.encoded_size / 1000,
+                    .encode_size_ratio = (float)info.encoded_size / (float)raw_size,
                 }
             );
         }
@@ -246,7 +247,7 @@ struct BenchmarkResult
             channels == qoipp::Channels::RGB ? "RGB" : "RGBA"
         );
 
-        if (libsInfo.empty()) {
+        if (libs_info.empty()) {
             fmt::println("\tNo results");
             return;
         }
@@ -259,22 +260,22 @@ struct BenchmarkResult
         print_sep("┡", "┩", "╇", "━");
         // clang-format on
 
-        const auto getCodecRatio = [&](const Printed& info) -> std::pair<int, int> {
+        const auto get_codec_ratio = [&](const Printed& info) -> std::pair<int, int> {
             const auto percent = [](auto old, auto neww) { return (neww - old) / old * 100; };
 
             if (printed.contains(lib::Lib::qoi)) {
-                auto qoi     = printed[lib::Lib::qoi];
-                auto qoiEnc  = qoi.totalEncodeTime;
-                auto qoiDec  = qoi.totalDecodeTime;
-                auto infoEnc = info.totalEncodeTime;
-                auto infoDec = info.totalDecodeTime;
+                auto qoi      = printed[lib::Lib::qoi];
+                auto qoi_enc  = qoi.total_encode_time;
+                auto qoi_dec  = qoi.total_decode_time;
+                auto info_enc = info.total_encode_time;
+                auto info_dec = info.total_decode_time;
 
-                if (qoiEnc <= std::numeric_limits<float>::epsilon()) {
-                    return { 0, percent(qoiDec, infoDec) };
-                } else if (qoiDec <= std::numeric_limits<float>::epsilon()) {
-                    return { percent(qoiEnc, infoEnc), 0 };
+                if (qoi_enc <= std::numeric_limits<float>::epsilon()) {
+                    return { 0, percent(qoi_dec, info_dec) };
+                } else if (qoi_dec <= std::numeric_limits<float>::epsilon()) {
+                    return { percent(qoi_enc, info_enc), 0 };
                 } else {
-                    return { percent(qoiEnc, infoEnc), percent(qoiDec, infoDec) };
+                    return { percent(qoi_enc, info_enc), percent(qoi_dec, info_dec) };
                 }
             } else {
                 return { 0, 0 };
@@ -282,30 +283,30 @@ struct BenchmarkResult
         };
 
         for (const auto& [lib, info] : printed) {
-            auto [encRatio, decRatio] = getCodecRatio(info);
+            auto [enc, dec] = get_codec_ratio(info);
             if (color) {
                 print_row(
                     lib::names[lib],
-                    info.totalEncodeTime,
-                    info.totalDecodeTime,
-                    info.pixelsPerEncode,
-                    info.pixelsPerDecode,
-                    fmt::styled(encRatio, fmt::bg(encRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
-                    fmt::styled(decRatio, fmt::bg(decRatio > 0 ? fmt::color::orange_red : fmt::color::green)),
-                    info.encodedSizeKiB,
-                    info.encodeSizeRatio * 100.0
+                    info.total_encode_time,
+                    info.total_decode_time,
+                    info.pixels_per_encode,
+                    info.pixels_per_decode,
+                    fmt::styled(enc, fmt::bg(enc > 0 ? fmt::color::orange_red : fmt::color::green)),
+                    fmt::styled(dec, fmt::bg(dec > 0 ? fmt::color::orange_red : fmt::color::green)),
+                    info.encode_size_KiB,
+                    info.encode_size_ratio * 100.0
                 );
             } else {
                 print_row(
                     lib::names[lib],
-                    info.totalEncodeTime,
-                    info.totalDecodeTime,
-                    info.pixelsPerEncode,
-                    info.pixelsPerDecode,
-                    encRatio,
-                    decRatio,
-                    info.encodedSizeKiB,
-                    info.encodeSizeRatio * 100.0
+                    info.total_encode_time,
+                    info.total_decode_time,
+                    info.pixels_per_encode,
+                    info.pixels_per_decode,
+                    enc,
+                    dec,
+                    info.encode_size_KiB,
+                    info.encode_size_ratio * 100.0
                 );
             }
         }
@@ -314,7 +315,7 @@ struct BenchmarkResult
     }
 };
 
-RawImage loadImage(const fs::path& file)
+RawImage load_image(const fs::path& file)
 {
     int   width, height, channels;
     auto* data = stbi_load(file.c_str(), &width, &height, &channels, 0);
@@ -324,7 +325,7 @@ RawImage loadImage(const fs::path& file)
 
     auto size = static_cast<size_t>(width * height * channels);
 
-    RawImage image{
+    auto image = RawImage{
         .data = { data, data + size },
         .desc = {
             .width      = static_cast<unsigned int>(width),
@@ -338,31 +339,30 @@ RawImage loadImage(const fs::path& file)
     return image;
 }
 
-EncodeResult<> qoiEncode(const RawImage& image)
+EncodeResult<> qoi_encode_wrapper(const RawImage& im)
 {
-    qoi_desc desc{
-        .width      = static_cast<unsigned int>(image.desc.width),
-        .height     = static_cast<unsigned int>(image.desc.height),
-        .channels   = (unsigned char)(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = (unsigned char)(image.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR
-        ),
+    auto desc = qoi_desc{
+        .width      = static_cast<unsigned int>(im.desc.width),
+        .height     = static_cast<unsigned int>(im.desc.height),
+        .channels   = (unsigned char)(im.desc.channels == qoipp::Channels::RGB ? 3 : 4),
+        .colorspace = (unsigned char)(im.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR),
     };
 
     int   len;
     auto  timepoint = Clock::now();
-    auto* data      = qoi_encode(image.data.data(), &desc, &len);
+    auto* data      = qoi_encode(im.data.data(), &desc, &len);
     auto  duration  = Clock::now() - timepoint;
 
     if (!data) {
         throw std::runtime_error{ "Error encoding image (qoi)" };
     }
 
-    auto* bytePtr = reinterpret_cast<std::uint8_t*>(data);
+    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
 
-    EncodeResult result{
+    auto result = EncodeResult{
         .image = {
-            .data  = { bytePtr, bytePtr + len },
-            .desc  = image.desc,
+            .data  = { byte_ptr, byte_ptr + len },
+            .desc  = im.desc,
         },
         .time = duration,
     };
@@ -371,7 +371,7 @@ EncodeResult<> qoiEncode(const RawImage& image)
     return result;
 }
 
-DecodeResult qoiDecode(const QoiImage& image)
+DecodeResult qoi_decode_wrapper(const QoiImage& image)
 {
     qoi_desc desc;
 
@@ -383,12 +383,12 @@ DecodeResult qoiDecode(const QoiImage& image)
         throw std::runtime_error{ "Error decoding image (qoi)" };
     }
 
-    auto* bytePtr = reinterpret_cast<std::uint8_t*>(data);
-    auto  size    = static_cast<size_t>(desc.width * desc.height * desc.channels);
+    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
+    auto  size     = static_cast<size_t>(desc.width * desc.height * desc.channels);
 
-    DecodeResult result{
+    auto result = DecodeResult{
         .image = {
-            .data = { bytePtr, bytePtr + size },
+            .data = { byte_ptr, byte_ptr + size },
             .desc = {
                 .width      = desc.width,
                 .height     = desc.height,
@@ -403,11 +403,11 @@ DecodeResult qoiDecode(const QoiImage& image)
     return result;
 }
 
-EncodeResult<> qoixxEncode(const RawImage& image)
+EncodeResult<> qoixx_encode(const RawImage& image)
 {
     using T = qoipp::Vec;
 
-    qoixx::qoi::desc desc = {
+    auto desc = qoixx::qoi::desc{
         .width      = image.desc.width,
         .height     = image.desc.height,
         .channels   = std::uint8_t(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
@@ -425,7 +425,7 @@ EncodeResult<> qoixxEncode(const RawImage& image)
     };
 }
 
-EncodeResult<> qoixxDecode(const QoiImage& image)
+EncodeResult<> qoixx_decode(const QoiImage& image)
 {
     using T = qoipp::Vec;
 
@@ -433,7 +433,7 @@ EncodeResult<> qoixxDecode(const QoiImage& image)
     auto [encoded, desc] = qoixx::qoi::decode<T>(image.data);
     auto duration        = Clock::now() - timepoint;
 
-    qoipp::ImageDesc qoippDesc = {
+    auto qoipp_desc = qoipp::ImageDesc{
         .width      = desc.width,
         .height     = desc.height,
         .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
@@ -442,12 +442,12 @@ EncodeResult<> qoixxDecode(const QoiImage& image)
     };
 
     return {
-        .image = { encoded, qoippDesc },
+        .image = { encoded, qoipp_desc },
         .time  = duration,
     };
 }
 
-EncodeResult<> qoippEncode(const RawImage& image)
+EncodeResult<> qoipp_encode(const RawImage& image)
 {
     auto timepoint = Clock::now();
     auto encoded   = qoipp::encode(image.data, image.desc);
@@ -459,7 +459,7 @@ EncodeResult<> qoippEncode(const RawImage& image)
     };
 }
 
-DecodeResult qoippDecode(const QoiImage& image)
+DecodeResult qoipp_decode(const QoiImage& image)
 {
     auto timepoint       = Clock::now();
     auto [decoded, desc] = qoipp::decode(image.data);
@@ -471,7 +471,7 @@ DecodeResult qoippDecode(const QoiImage& image)
     };
 }
 
-EncodeResult<PngImage> stbEncode(const RawImage& image)
+EncodeResult<PngImage> stb_encode(const RawImage& image)
 {
     auto timepoint = Clock::now();
     auto len       = 0;
@@ -488,7 +488,7 @@ EncodeResult<PngImage> stbEncode(const RawImage& image)
 
     auto duration = Clock::now() - timepoint;
 
-    EncodeResult<PngImage> result {
+    auto result = EncodeResult<PngImage>{
         .image = {
             .data = { encoded, encoded + len },
             .desc = desc,
@@ -500,7 +500,7 @@ EncodeResult<PngImage> stbEncode(const RawImage& image)
     return result;
 }
 
-DecodeResult stbDecode(const PngImage& image)
+DecodeResult stb_decode(const PngImage& image)
 {
     auto timepoint = Clock::now();
     int  width, height, channels;
@@ -516,7 +516,7 @@ DecodeResult stbDecode(const PngImage& image)
     auto duration = Clock::now() - timepoint;
     auto size     = static_cast<size_t>(width * height * channels);
 
-    DecodeResult result{
+    auto result = DecodeResult{
         .image = {
             .data = { data, data + size },
             .desc = {
@@ -533,7 +533,7 @@ DecodeResult stbDecode(const PngImage& image)
     return result;
 }
 
-EncodeResult<PngImage> fpngEncode(const RawImage& image)
+EncodeResult<PngImage> fpng_encode(const RawImage& image)
 {
     auto& [data, desc] = image;
     auto chan          = static_cast<unsigned int>(desc.channels);
@@ -547,18 +547,16 @@ EncodeResult<PngImage> fpngEncode(const RawImage& image)
         throw std::runtime_error{ "Error encoding image (fpng)" };
     }
 
-    auto bytePtr = (encoded.data());
-
     return {
         .image = {
-            .data = { bytePtr, bytePtr + encoded.size() },
+            .data = std::move(encoded),
             .desc = desc,
         },
         .time = duration,
     };
 }
 
-DecodeResult fpngDecode(const PngImage& image)
+DecodeResult fpng_decode(const PngImage& image)
 {
     auto& [data, desc] = image;
 
@@ -582,15 +580,13 @@ DecodeResult fpngDecode(const PngImage& image)
         throw std::runtime_error{ "Error decoding image (fpng)" };
     }
 
-    auto bytePtr = (decoded.data());
-
     return {
         .image = {
-            .data = { bytePtr, bytePtr + decoded.size() },
+            .data = std::move(decoded),
             .desc = {
-                .width = width,
-                .height = height,
-                .channels = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+                .width      = width,
+                .height     = height,
+                .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
                 .colorspace = qoipp::Colorspace::sRGB,
             },
         },
@@ -602,60 +598,60 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
 {
     fmt::println("\t>> Benchmarking '{}'", file);
 
-    auto rawImage     = loadImage(file);
-    auto qoiImage     = qoiEncode(rawImage).image;
-    auto pngImageFpng = opt.fpng ? fpngEncode(rawImage).image : PngImage{};
-    auto pngImageStb  = opt.stb ? stbEncode(rawImage).image : PngImage{};
+    auto raw_image      = load_image(file);
+    auto qoi_image      = qoi_encode_wrapper(raw_image).image;
+    auto png_image_fpng = opt.fpng ? fpng_encode(raw_image).image : PngImage{};
+    auto png_image_stb  = opt.stb ? stb_encode(raw_image).image : PngImage{};
 
     if (opt.verify) {
-        const auto verify = [&]<typename T>(const T& leftImage, const T& rightImage)
+        const auto verify = [&]<typename T>(const T& left_image, const T& right_image)
             requires(std::same_as<T, RawImage> or std::same_as<T, QoiImage>)
         {
-            if (leftImage.data != rightImage.data || leftImage.desc != rightImage.desc) {
+            if (left_image.data != right_image.data || left_image.desc != right_image.desc) {
                 fmt::println("\t\tVerification failed for {} [skipped]", file);
                 return false;
             }
             return true;
         };
 
-        {    // qoi encode -> qoipp decode -> compare with rawImage
+        {    // qoi encode -> qoipp decode -> compare with raw_image
             fmt::println("\t\tverifying qoi   encode -> qoipp decode");
-            auto [qoiEncoded, _]    = qoiEncode(rawImage);
-            auto [qoippDecoded, __] = qoippDecode(qoiEncoded);
-            if (!verify(qoippDecoded, rawImage)) {
+            auto [qoi_encoded, _]    = qoi_encode_wrapper(raw_image);
+            auto [qoipp_decoded, __] = qoipp_decode(qoi_encoded);
+            if (!verify(qoipp_decoded, raw_image)) {
                 return { .file = file };
             }
         }
 
-        {    // qoipp encode -> qoi decode -> compare with rawImage
+        {    // qoipp encode -> qoi decode -> compare with raw_image
             fmt::println("\t\tverifying qoipp encode -> qoi   decode");
-            auto [qoippEncoded, _] = qoippEncode(rawImage);
-            auto [qoiDecoded, __]  = qoiDecode(qoippEncoded);
-            if (!verify(qoiDecoded, rawImage)) {
+            auto [qoipp_encoded, _] = qoipp_encode(raw_image);
+            auto [qoi_decoded, __]  = qoi_decode_wrapper(qoipp_encoded);
+            if (!verify(qoi_decoded, raw_image)) {
                 return { .file = file };
             }
         }
 
-        {    // qoi decode -> qoipp encode -> compare with qoiImage
+        {    // qoi decode -> qoipp encode -> compare with qoi_image
             fmt::println("\t\tverifying qoi   decode -> qoipp encode");
-            auto [qoiDecoded, _]    = qoiDecode(qoiImage);
-            auto [qoippEncoded, __] = qoippEncode(qoiDecoded);
-            if (!verify(qoippEncoded, qoiImage)) {
+            auto [qoi_decoded, _]    = qoi_decode_wrapper(qoi_image);
+            auto [qoipp_encoded, __] = qoipp_encode(qoi_decoded);
+            if (!verify(qoipp_encoded, qoi_image)) {
                 return { .file = file };
             }
         }
 
-        {    // qoipp decode -> qoi encode -> compare with qoiImage
+        {    // qoipp decode -> qoi encode -> compare with qoi_image
             fmt::println("\t\tverifying qoipp decode -> qoi   encode");
-            auto [qoippDecoded, _] = qoippDecode(qoiImage);
-            auto [qoiEncoded, __]  = qoiEncode(qoippDecoded);
-            if (!verify(qoiEncoded, qoiImage)) {
+            auto [qoipp_decoded, _] = qoipp_decode(qoi_image);
+            auto [qoi_encoded, __]  = qoi_encode_wrapper(qoipp_decoded);
+            if (!verify(qoi_encoded, qoi_image)) {
                 return { .file = file };
             }
         }
     }
 
-    auto benchmarkImpl = [&](auto func, const auto& image) {
+    auto benchmark_impl = [&](auto func, const auto& image) {
         auto [_, time] = func(image);
         if (opt.warmup) {
             for (auto i = 0; i < 3; ++i) {
@@ -663,7 +659,7 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
             }
         }
 
-        Duration    total = Duration::zero();
+        auto        total = Duration::zero();
         std::size_t size  = 0;
         for (auto run = opt.runs; run-- > 0;) {
             auto [coded, time]  = func(image);
@@ -677,69 +673,69 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
     // the benchmark starts here
 
     BenchmarkResult result = {
-        .desc    = qoiImage.desc,
-        .file    = file,
-        .rawSize = rawImage.data.size(),
+        .desc     = qoi_image.desc,
+        .file     = file,
+        .raw_size = raw_image.data.size(),
     };
 
     fmt::println("\t\tbenchmark");
 
     if (opt.encode) {
-        auto [qoiTime, qoiSize]     = benchmarkImpl(qoiEncode, rawImage);
-        auto [qoixxTime, qoixxSize] = benchmarkImpl(qoixxEncode, rawImage);
-        auto [qoippTime, qoippSize] = benchmarkImpl(qoippEncode, rawImage);
+        auto [qoi_time, qoi_size]     = benchmark_impl(qoi_encode_wrapper, raw_image);
+        auto [qoixx_time, qoixx_size] = benchmark_impl(qoixx_encode, raw_image);
+        auto [qoipp_time, qoipp_size] = benchmark_impl(qoipp_encode, raw_image);
 
-        result.libsInfo[lib::Lib::qoi].encodeTime  = qoiTime;
-        result.libsInfo[lib::Lib::qoi].encodedSize = qoiSize;
+        result.libs_info[lib::Lib::qoi].encode_time  = qoi_time;
+        result.libs_info[lib::Lib::qoi].encoded_size = qoi_size;
 
-        result.libsInfo[lib::Lib::qoixx].encodeTime  = qoixxTime;
-        result.libsInfo[lib::Lib::qoixx].encodedSize = qoixxSize;
+        result.libs_info[lib::Lib::qoixx].encode_time  = qoixx_time;
+        result.libs_info[lib::Lib::qoixx].encoded_size = qoixx_size;
 
-        result.libsInfo[lib::Lib::qoipp].encodeTime  = qoippTime;
-        result.libsInfo[lib::Lib::qoipp].encodedSize = qoippSize;
+        result.libs_info[lib::Lib::qoipp].encode_time  = qoipp_time;
+        result.libs_info[lib::Lib::qoipp].encoded_size = qoipp_size;
 
         if (opt.stb) {
-            auto [stbTime, stbSize] = benchmarkImpl(stbEncode, rawImage);
+            auto [stb_time, stb_size] = benchmark_impl(stb_encode, raw_image);
 
-            result.libsInfo[lib::Lib::stb].encodeTime  = stbTime;
-            result.libsInfo[lib::Lib::stb].encodedSize = stbSize;
+            result.libs_info[lib::Lib::stb].encode_time  = stb_time;
+            result.libs_info[lib::Lib::stb].encoded_size = stb_size;
         }
         if (opt.fpng) {
-            auto [fpngTime, fpngSize] = benchmarkImpl(fpngEncode, rawImage);
+            auto [fpng_time, fpng_size] = benchmark_impl(fpng_encode, raw_image);
 
-            result.libsInfo[lib::Lib::fpng].encodeTime  = fpngTime;
-            result.libsInfo[lib::Lib::fpng].encodedSize = fpngSize;
+            result.libs_info[lib::Lib::fpng].encode_time  = fpng_time;
+            result.libs_info[lib::Lib::fpng].encoded_size = fpng_size;
         }
     }
 
     if (opt.decode) {
-        auto [qoiTime, _]     = benchmarkImpl(qoiDecode, qoiImage);
-        auto [qoixxTime, __]  = benchmarkImpl(qoixxDecode, qoiImage);
-        auto [qoippTime, ___] = benchmarkImpl(qoippDecode, qoiImage);
+        auto [qoi_time, _]     = benchmark_impl(qoi_decode_wrapper, qoi_image);
+        auto [qoixx_time, __]  = benchmark_impl(qoixx_decode, qoi_image);
+        auto [qoipp_time, ___] = benchmark_impl(qoipp_decode, qoi_image);
 
-        result.libsInfo[lib::Lib::qoi].decodeTime   = qoiTime;
-        result.libsInfo[lib::Lib::qoixx].decodeTime = qoixxTime;
-        result.libsInfo[lib::Lib::qoipp].decodeTime = qoippTime;
+        result.libs_info[lib::Lib::qoi].decode_time   = qoi_time;
+        result.libs_info[lib::Lib::qoixx].decode_time = qoixx_time;
+        result.libs_info[lib::Lib::qoipp].decode_time = qoipp_time;
 
         if (opt.stb) {
-            auto [stbTime, _] = benchmarkImpl(stbDecode, pngImageStb);
+            auto [stb_time, _] = benchmark_impl(stb_decode, png_image_stb);
 
-            result.libsInfo[lib::Lib::stb].decodeTime = stbTime;
+            result.libs_info[lib::Lib::stb].decode_time = stb_time;
         }
 
         if (opt.fpng) {
-            auto [fpngTime, _] = benchmarkImpl(fpngDecode, pngImageFpng);
+            auto [fpng_time, _] = benchmark_impl(fpng_decode, png_image_fpng);
 
-            result.libsInfo[lib::Lib::fpng].decodeTime = fpngTime;
+            result.libs_info[lib::Lib::fpng].decode_time = fpng_time;
         }
     }
 
     return result;
 }
 
-std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Options& opt)
+std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Options& opt)
 {
-    std::vector<BenchmarkResult> results;
+    auto results = std::vector<BenchmarkResult>{};
 
     if (opt.recurse) {
         fmt::println(">> Benchmarking {} (recurse)...", path / "**/*.png");
@@ -768,7 +764,7 @@ std::vector<BenchmarkResult> benchmarkDirectory(const fs::path& path, const Opti
     return results;
 }
 
-BenchmarkResult averageResults(std::span<const BenchmarkResult> results)
+BenchmarkResult average_results(std::span<const BenchmarkResult> results)
 {
     auto average = BenchmarkResult{
         .desc = {
@@ -778,25 +774,25 @@ BenchmarkResult averageResults(std::span<const BenchmarkResult> results)
             .colorspace = {},
         },
         .file    = "Summary",
-        .rawSize = 0,
+        .raw_size = 0,
     };
 
     auto add = [&](const std::map<lib::Lib, BenchmarkResult::LibInfo>& values) {
         for (auto&& [k, v] : values) {
-            average.libsInfo[k].encodeTime  += v.encodeTime;
-            average.libsInfo[k].decodeTime  += v.decodeTime;
-            average.libsInfo[k].encodedSize += v.encodedSize;
+            average.libs_info[k].encode_time  += v.encode_time;
+            average.libs_info[k].decode_time  += v.decode_time;
+            average.libs_info[k].encoded_size += v.encoded_size;
         }
     };
 
     for (auto&& result : results) {
-        average.rawSize += result.rawSize;
-        add(result.libsInfo);
+        average.raw_size += result.raw_size;
+        add(result.libs_info);
     }
 
-    for (auto& [_, v] : average.libsInfo) {
-        v.encodeTime /= static_cast<long>(results.size());
-        v.decodeTime /= static_cast<long>(results.size());
+    for (auto& [_, v] : average.libs_info) {
+        v.encode_time /= static_cast<long>(results.size());
+        v.decode_time /= static_cast<long>(results.size());
     }
 
     return average;
@@ -804,9 +800,9 @@ BenchmarkResult averageResults(std::span<const BenchmarkResult> results)
 
 int main(int argc, char* argv[])
 try {
-    CLI::App app{ "Qoibench - Benchmarking tool for QOI" };
-    Options  opt;
-    fs::path dirpath;
+    auto app     = CLI::App{ "Qoibench - Benchmarking tool for QOI" };
+    auto opt     = Options{};
+    auto dirpath = fs::path{};
 
     app.add_option("dir", dirpath, "Directory to benchmark")->required();
     opt.configure(app);
@@ -828,8 +824,8 @@ try {
     fpng::fpng_init();
 
     if (fs::is_directory(dirpath)) {
-        auto results = benchmarkDirectory(dirpath, opt);
-        auto summary = averageResults(results);
+        auto results = benchmark_directory(dirpath, opt);
+        auto summary = average_results(results);
         summary.print(opt.color);
     } else if (fs::is_regular_file(dirpath) and dirpath.extension() == ".png") {
         auto result = benchmark(dirpath, opt);
