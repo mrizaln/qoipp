@@ -63,7 +63,7 @@ struct ImageVar
         );
     }
 
-    void printInfo()
+    void print_info()
     {
         const auto& [_, desc]                      = get();
         auto [width, height, channels, colorspace] = desc;
@@ -83,15 +83,15 @@ enum class FileType
     QOI
 };
 
-Vec loadFile(const fs::path& filepath)
+Vec load_file(const fs::path& filepath)
 {
-    std::ifstream file{ filepath, std::ios::binary };
+    auto file = std::ifstream{ filepath, std::ios::binary };
     if (!file) {
         throw std::runtime_error{ std::format("Failed to open file '{}'", filepath.c_str()) };
     }
 
-    const auto size = fs::file_size(filepath);
-    Vec        bytes(size);
+    const auto size  = fs::file_size(filepath);
+    auto       bytes = Vec(size);
 
     DO_TIME_MS ("Read from file") {
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
@@ -100,9 +100,9 @@ Vec loadFile(const fs::path& filepath)
     return bytes;
 }
 
-ImageVar readPng(const fs::path& filepath)
+ImageVar read_png(const fs::path& filepath)
 {
-    auto  bytes = loadFile(filepath);
+    auto  bytes = load_file(filepath);
     int   width, height, channels;
     auto* data = DO_TIME_MS ("Decode png (stb)")
     {
@@ -131,17 +131,17 @@ ImageVar readPng(const fs::path& filepath)
     } };
 }
 
-ImageVar readQoi(const fs::path& filepath, bool rgbOnly)
+ImageVar read_qoi(const fs::path& filepath, bool rgb_only)
 {
-    auto bytes   = loadFile(filepath);
+    auto bytes   = load_file(filepath);
     auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
     {
-        return qoipp::decode(bytes, rgbOnly ? std::optional{ qoipp::Channels::RGB } : std::nullopt);
+        return qoipp::decode(bytes, rgb_only ? std::optional{ qoipp::Channels::RGB } : std::nullopt);
     };
     return { decoded };
 }
 
-void writePng(const ImageVar& image, const fs::path& filepath)
+void write_png(const ImageVar& image, const fs::path& filepath)
 {
     const auto& [data, desc] = image.get();
 
@@ -164,7 +164,7 @@ void writePng(const ImageVar& image, const fs::path& filepath)
     };
 }
 
-void writeQoi(const ImageVar& image, const fs::path& filepath)
+void write_qoi(const ImageVar& image, const fs::path& filepath)
 {
     auto [data, desc] = image.get();
 
@@ -172,7 +172,7 @@ void writeQoi(const ImageVar& image, const fs::path& filepath)
     {
         return qoipp::encode(data, desc);
     };
-    std::ofstream out{ filepath, std::ios::binary | std::ios::trunc };
+    auto out = std::ofstream{ filepath, std::ios::binary | std::ios::trunc };
 
     DO_TIME_MS ("Write to file (qoipp)") {
         out.write(reinterpret_cast<char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
@@ -181,8 +181,8 @@ void writeQoi(const ImageVar& image, const fs::path& filepath)
 
 std::pair<FileType, FileType> validate(const fs::path& input, const fs::path& output) noexcept(false)
 {
-    const auto isPng = [](const fs::path& p) { return p.extension() == ".png"; };
-    const auto isQoi = [](const fs::path& p) { return p.extension() == ".qoi"; };
+    const auto is_png = [](const fs::path& p) { return p.extension() == ".png"; };
+    const auto is_qoi = [](const fs::path& p) { return p.extension() == ".qoi"; };
 
     if (!fs::exists(input)) {
         throw std::runtime_error{ std::format("Input file does not exist '{}'", input.c_str()) };
@@ -192,35 +192,35 @@ std::pair<FileType, FileType> validate(const fs::path& input, const fs::path& ou
         throw std::runtime_error{ "Input and output files must be different" };
     }
 
-    if (!isPng(input) && !isQoi(input)) {
+    if (!is_png(input) && !is_qoi(input)) {
         throw std::runtime_error{ std::format("Invalid input file '{}'", input.c_str()) };
     }
 
-    if (!isPng(output) && !isQoi(output)) {
+    if (!is_png(output) && !is_qoi(output)) {
         throw std::runtime_error{ std::format("Invalid output file: '{}'", output.c_str()) };
     }
 
-    if ((isPng(input) && isPng(output)) || (isQoi(input) && isQoi(output))) {
+    if ((is_png(input) && is_png(output)) || (is_qoi(input) && is_qoi(output))) {
         throw std::runtime_error{ "Input and output files must be of different types" };
     }
 
     return {
-        isPng(input) ? FileType::PNG : FileType::QOI,
-        isPng(output) ? FileType::PNG : FileType::QOI,
+        is_png(input) ? FileType::PNG : FileType::QOI,
+        is_png(output) ? FileType::PNG : FileType::QOI,
     };
 }
 
 int main(int argc, char** argv)
 try {
-    CLI::App app{ "QOI to PNG and PNG to QOI converter" };
+    auto app = CLI::App{ "QOI to PNG and PNG to QOI converter" };
 
-    fs::path inputPath;
-    fs::path outputPath;
-    bool     rgbOnly = false;
+    auto input_path  = fs::path{};
+    auto output_path = fs::path{};
+    auto rgb_only    = false;
 
-    app.add_option("infile", inputPath, "Input filepath")->required();
-    app.add_option("outfile", outputPath, "Output filepath")->required();
-    app.add_flag("--rgb-only", rgbOnly, "Extract rgb only (for QOI image)");
+    app.add_option("infile", input_path, "Input filepath")->required();
+    app.add_option("outfile", output_path, "Output filepath")->required();
+    app.add_flag("--rgb-only", rgb_only, "Extract rgb only (for QOI image)");
 
     if (argc <= 1) {
         fmt::print("{}", app.help());
@@ -229,15 +229,15 @@ try {
 
     CLI11_PARSE(app, argc, argv);
 
-    auto [input, output] = validate(inputPath, outputPath);
+    auto [input, output] = validate(input_path, output_path);
     if (input == FileType::PNG && output == FileType::QOI) {
-        auto image = readPng(inputPath);
-        image.printInfo();
-        writeQoi(image, outputPath);
+        auto image = read_png(input_path);
+        image.print_info();
+        write_qoi(image, output_path);
     } else if (input == FileType::QOI && output == FileType::PNG) {
-        auto image = readQoi(inputPath, rgbOnly);
-        image.printInfo();
-        writePng(image, outputPath);
+        auto image = read_qoi(input_path, rgb_only);
+        image.print_info();
+        write_png(image, output_path);
     } else [[unlikely]] {
         throw std::runtime_error{ "?????? How did you get here?" };
     }

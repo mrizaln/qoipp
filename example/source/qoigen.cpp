@@ -58,7 +58,7 @@ public:
         , m_perlinInfo(static_cast<std::size_t>(channels))
     {
         for (auto& info : m_perlinInfo) {
-            info = randomPerlinInfo();
+            info = random_perlin_info();
         }
 
         fmt::println("\nImageGen initialized with current settings:");
@@ -72,38 +72,37 @@ public:
 
     Vec generate(unsigned int width, unsigned int height)
     {
+        const auto pixel_size = width * height;
+        const auto channels   = static_cast<std::size_t>(m_channels);
 
-        const auto pixelSize = width * height;
-        const auto channels  = static_cast<std::size_t>(m_channels);
+        auto result = Vec{};
+        result.reserve(pixel_size * channels);
 
-        Vec result;
-        result.reserve(pixelSize * channels);
+        auto x_bias = std::vector<float>(channels);
+        auto y_bias = std::vector<float>(channels);
 
-        std::vector<float> xBias(channels);
-        std::vector<float> yBias(channels);
-
-        for (auto&& [x, y] : rv::zip(xBias, yBias)) {
+        for (auto&& [x, y] : rv::zip(x_bias, y_bias)) {
             x = random<float>(-1.0f, 1.0f);
             y = random<float>(-1.0f, 1.0f);
         };
 
-        for (auto i : rv::iota(0u, pixelSize)) {
+        for (auto i : rv::iota(0u, pixel_size)) {
             const auto x = i % width;
             const auto y = i / height;
 
-            std::vector<float> fx(channels);
-            std::vector<float> fy(channels);
+            auto fx = std::vector<float>(channels);
+            auto fy = std::vector<float>(channels);
 
             for (auto&& [fx, fy, info] : rv::zip(fx, fy, m_perlinInfo)) {
                 fx = static_cast<float>(x) * info.freq / static_cast<float>(width);
                 fy = static_cast<float>(y) * info.freq / static_cast<float>(height);
             }
 
-            std::vector<std::uint8_t> color(channels);
+            auto color = std::vector<std::uint8_t>(channels);
 
             for (const auto& [j, info] : rv::enumerate(m_perlinInfo)) {
                 color[j] = static_cast<std::uint8_t>(
-                    info.noise.octave2D_01(fx[j] + xBias[j], fy[j] + yBias[j], info.octave) * 0xFF
+                    info.noise.octave2D_01(fx[j] + x_bias[j], fy[j] + y_bias[j], info.octave) * 0xFF
                 );
             }
 
@@ -117,7 +116,7 @@ private:
     Channels                m_channels;
     std::vector<PerlinInfo> m_perlinInfo;
 
-    static PerlinInfo randomPerlinInfo()
+    static PerlinInfo random_perlin_info()
     {
         return {
             .noise  = siv::PerlinNoise{ siv::PerlinNoise::seed_type(std::time(nullptr)) },
@@ -129,12 +128,13 @@ private:
 
 int main(int argc, char* argv[])
 {
-    CLI::App app{ "QOI image file generator" };
+    auto app = CLI::App{ "QOI image file generator" };
 
-    fs::path     outpath  = "out.qoi";
-    unsigned int width    = 500;
-    unsigned int height   = 500;
-    Channels     channels = Channels::RGB;
+    auto outpath  = fs::path{ "out.qoi" };
+    auto channels = Channels::RGB;
+
+    unsigned int width  = 500;
+    unsigned int height = 500;
 
     app.add_option("outfile", outpath, "The output filepath for the generated image")->default_val(outpath);
     app.add_option("-w,--width", width, "The width of the qoi image")->required();
@@ -150,19 +150,19 @@ int main(int argc, char* argv[])
 
     CLI11_PARSE(app, argc, argv);
 
-    qoipp::ImageDesc desc{
+    auto desc = qoipp::ImageDesc{
         .width      = width,
         .height     = height,
         .channels   = channels,
         .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    ImageGen imgGen{ channels };
+    auto img_gen = ImageGen{ channels };
 
     auto bytes = DO_TIME_MS ("Generate image")
     {
         fmt::println("Generating image...");
-        return imgGen.generate(desc.width, desc.height);
+        return img_gen.generate(desc.width, desc.height);
     };
 
     auto encoded = DO_TIME_MS ("Encode image")
@@ -171,6 +171,6 @@ int main(int argc, char* argv[])
         return qoipp::encode(bytes, desc);
     };
 
-    std::ofstream out{ outpath, std::ios::binary };
+    auto out = std::ofstream{ outpath, std::ios::binary };
     out.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
 }
