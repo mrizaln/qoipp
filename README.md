@@ -29,8 +29,8 @@ int main()
 {
     qoipp::Image image = qoipp::decode_from_file("./path/to/file.qoi");
 
-    // image.m_data     is the raw image bytes decoded from the file
-    // image.m_desc     is the image description (width/height/channels/colorspace)
+    // image.data     is the raw image bytes decoded from the file
+    // image.desc     is the image description (width/height/channels/colorspace)
 
     // do somthing with the image data...
 }
