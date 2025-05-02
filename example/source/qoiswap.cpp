@@ -30,7 +30,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    auto maybeHeader = qoipp::readHeaderFromFile(input);
+    auto maybeHeader = qoipp::read_header_from_file(input);
     if (not maybeHeader) {
         fmt::println(stderr, "File is not a qoi image");
         return 1;
@@ -47,18 +47,18 @@ int main(int argc, char** argv)
             auto& [data, desc] = image;
             auto idx           = index * static_cast<std::size_t>(desc.channels);
 
-            auto r = data[idx + 0];
-            auto g = data[idx + 1];
-            auto b = data[idx + 2];
-            auto a = desc.channels == qoipp::Channels::RGBA ? data[idx + 3] : std::uint8_t{ 0xFF };
-
-            return { g, b, r, a };
+            return {
+                .r = data[idx + 1],
+                .g = data[idx + 2],
+                .b = data[idx + 0],
+                .a = desc.channels == qoipp::Channels::RGBA ? data[idx + 3] : std::uint8_t{ 0xFF },
+            };
         }
     };
 
-    auto image    = qoipp::decodeFromFile(input);
+    auto image    = qoipp::decode_from_file(input);
     auto now      = std::chrono::steady_clock::now();
-    auto swapped  = qoipp::encodeFromFunction(SwapChannels{ image }, image.desc);
+    auto swapped  = qoipp::encode_from_function(SwapChannels{ image }, image.desc);
     auto duration = std::chrono::steady_clock::now() - now;
 
     auto out = std::fstream{ input, std::ios::out | std::ios::binary };
