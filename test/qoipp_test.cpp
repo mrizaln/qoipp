@@ -19,7 +19,6 @@
 #include <cstdio>
 #include <fstream>
 #include <filesystem>
-#include <initializer_list>
 #include <string>
 
 namespace rv = ranges::views;
@@ -40,10 +39,8 @@ using isize = std::ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-using Byte = std::byte;
-
-using qoipp::ByteSpan;
-using qoipp::ByteVec;
+using qoipp::Span;
+using qoipp::Vec;
 
 namespace fs = std::filesystem;
 namespace ut = boost::ut;
@@ -65,32 +62,23 @@ fs::path mktemp()
     return fs::temp_directory_path() / name;
 }
 
-ByteVec toBytes(std::initializer_list<u8> data)
-{
-    ByteVec result(data.size());
-    for (auto i : rv::iota(0u, data.size())) {
-        result[i] = Byte(data.begin()[i]);
-    }
-    return result;
-}
-
-ByteVec readFile(const fs::path& path)
+Vec readFile(const fs::path& path)
 {
     std::ifstream file{ path, std::ios::binary };
     file.exceptions(std::ios::failbit | std::ios::badbit);
 
-    ByteVec data(fs::file_size(path));
+    Vec data(fs::file_size(path));
     file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
     return data;
 }
 
-ByteVec rgbOnly(ByteSpan data)
+Vec rgbOnly(Span data)
 {
     if (data.size() % 4) {
         throw std::invalid_argument("data size must be a multiple of 4");
     }
 
-    ByteVec result;
+    Vec result;
     result.reserve(data.size() / 4 * 3);
 
     for (const auto& chunk : rv::chunk(data, 4)) {
@@ -108,16 +96,16 @@ Image loadImageStb(const fs::path& file)
         throw std::runtime_error{ fmt::format("Error decoding file '{}' (stb)", file) };
     }
 
-    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+    auto* bytePtr = reinterpret_cast<std::uint8_t*>(data);
     auto  size    = static_cast<size_t>(width * height * channels);
 
     Image image{
-        .m_data = { bytePtr, bytePtr + size },
-        .m_desc = {
-            .m_width      = static_cast<unsigned int>(width),
-            .m_height     = static_cast<unsigned int>(height),
-            .m_channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-            .m_colorspace = qoipp::Colorspace::sRGB,
+        .data = { bytePtr, bytePtr + size },
+        .desc = {
+            .width      = static_cast<unsigned int>(width),
+            .height     = static_cast<unsigned int>(height),
+            .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .colorspace = qoipp::Colorspace::sRGB,
         },
     };
 
@@ -128,32 +116,33 @@ Image loadImageStb(const fs::path& file)
 Image qoiEncode(const Image& image)
 {
     qoi_desc desc{
-        .width      = static_cast<unsigned int>(image.m_desc.m_width),
-        .height     = static_cast<unsigned int>(image.m_desc.m_height),
-        .channels   = (unsigned char)(image.m_desc.m_channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = (unsigned char)(image.m_desc.m_colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB
-                                                                                           : QOI_LINEAR),
+        .width      = static_cast<unsigned int>(image.desc.width),
+        .height     = static_cast<unsigned int>(image.desc.height),
+        .channels   = static_cast<unsigned char>(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
+        .colorspace = static_cast<unsigned char>(
+            image.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR
+        ),
     };
 
     int   len;
-    auto* data = qoi_encode(image.m_data.data(), &desc, &len);
+    auto* data = qoi_encode(image.data.data(), &desc, &len);
 
     if (!data) {
         throw std::runtime_error{ "Error encoding image (qoi)" };
     }
 
-    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+    auto* bytePtr = reinterpret_cast<std::uint8_t*>(data);
 
     Image result = {
-        .m_data = ByteVec{ bytePtr, bytePtr + len },
-        .m_desc = image.m_desc,
+        .data = Vec{ bytePtr, bytePtr + len },
+        .desc = image.desc,
     };
 
     QOI_FREE(data);
     return result;
 }
 
-Image qoiDecode(const ByteSpan image)
+Image qoiDecode(const Span image)
 {
     qoi_desc desc;
     auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
@@ -162,16 +151,16 @@ Image qoiDecode(const ByteSpan image)
         throw std::runtime_error{ "Error decoding image (qoi)" };
     }
 
-    auto* bytePtr = reinterpret_cast<std::byte*>(data);
+    auto* bytePtr = reinterpret_cast<std::uint8_t*>(data);
     auto  size    = static_cast<size_t>(desc.width * desc.height * desc.channels);
 
     Image result = {
-        .m_data = { bytePtr, bytePtr + size },
-        .m_desc = {
-            .m_width      = desc.width,
-            .m_height     = desc.height,
-            .m_channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-            .m_colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
+        .data = { bytePtr, bytePtr + size },
+        .desc = {
+            .width      = desc.width,
+            .height     = desc.height,
+            .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
         },
     };
 
@@ -180,7 +169,7 @@ Image qoiDecode(const ByteSpan image)
 }
 
 // too bad ut doesn't have something like this that can show diff between two spans
-std::string compare(ByteSpan lhs, ByteSpan rhs)
+std::string compare(Span lhs, Span rhs)
 {
     std::string result = fmt::format(
         "SHOULD BE EQUALS FOR ALL ELEMENTS:\nlhs size: {} | rhs size: {}\n", lhs.size(), rhs.size()
@@ -213,23 +202,23 @@ std::string compare(ByteSpan lhs, ByteSpan rhs)
 
 ut::suite threeChannelImage = [] {
     constexpr qoipp::ImageDesc desc{
-        .m_width      = 29,
-        .m_height     = 17,
-        .m_channels   = qoipp::Channels::RGB,
-        .m_colorspace = qoipp::Colorspace::sRGB,
+        .width      = 29,
+        .height     = 17,
+        .channels   = qoipp::Channels::RGB,
+        .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const ByteVec rawImage = toBytes({
+    const Vec rawImage = {
 #include "image_raw_3.txt"
-    });
+    };
 
-    const ByteVec qoiImage = toBytes({
+    const Vec qoiImage = {
 #include "image_qoi_3.txt"
-    });
+    };
 
-    const ByteVec qoiImageIncomplete = toBytes({
+    const Vec qoiImageIncomplete = {
 #include "image_qoi_3_incomplete.txt"
-    });
+    };
 
     "3-channel image encode"_test = [&] {
         const auto encoded = qoipp::encode(rawImage, desc);
@@ -262,10 +251,10 @@ ut::suite threeChannelImage = [] {
 
         qoipp::Image decoded;
         ut::expect(ut::nothrow([&] { decoded = qoipp::decodeFromFile(qoifile); }));
-        ut::expect(decoded.m_desc == desc);
-        ut::expect(ut::that % decoded.m_data.size() == rawImage.size());
-        ut::expect(std::memcmp(decoded.m_data.data(), rawImage.data(), rawImage.size()) == 0)
-            << compare(rawImage, decoded.m_data);
+        ut::expect(decoded.desc == desc);
+        ut::expect(ut::that % decoded.data.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.data.data(), rawImage.data(), rawImage.size()) == 0)
+            << compare(rawImage, decoded.data);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         ut::expect(fs::is_empty(qoifile));
@@ -281,10 +270,11 @@ ut::suite threeChannelImage = [] {
         ut::expect(header.has_value()) << "Invalid header";
         ut::expect(*header == desc);
 
-        const auto emptyHeader = qoipp::readHeader(ByteVec{});
+        const auto emptyHeader = qoipp::readHeader(Vec{});
         ut::expect(!emptyHeader.has_value());
 
-        const auto invalidHeader = qoipp::readHeader(toBytes({ 0x00, 0x01, 0x02, 0x03 }));
+        const auto invalidHeaderStr = Vec{ 0x00, 0x01, 0x02, 0x03 };
+        const auto invalidHeader    = qoipp::readHeader(invalidHeaderStr);
         ut::expect(!invalidHeader.has_value());
     };
 
@@ -314,23 +304,23 @@ ut::suite threeChannelImage = [] {
 
 ut::suite fourChannelImage = [] {
     constexpr qoipp::ImageDesc desc{
-        .m_width      = 24,
-        .m_height     = 14,
-        .m_channels   = qoipp::Channels::RGBA,
-        .m_colorspace = qoipp::Colorspace::sRGB,
+        .width      = 24,
+        .height     = 14,
+        .channels   = qoipp::Channels::RGBA,
+        .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const ByteVec rawImage = toBytes({
+    const Vec rawImage = {
 #include "image_raw_4.txt"
-    });
+    };
 
-    const ByteVec qoiImage = toBytes({
+    const Vec qoiImage = {
 #include "image_qoi_4.txt"
-    });
+    };
 
-    const ByteVec qoiImageIncomplete = toBytes({
+    const Vec qoiImageIncomplete = {
 #include "image_qoi_4_incomplete.txt"
-    });
+    };
 
     "4-channel image encode"_test = [&] {
         const auto encoded = qoipp::encode(rawImage, desc);
@@ -349,9 +339,7 @@ ut::suite fourChannelImage = [] {
 
     "4-channel image decode wants RGB only"_test = [&] {
         auto rgbImage = rgbOnly(rawImage);
-        auto rgbDesc  = qoipp::ImageDesc{
-            desc.m_width, desc.m_height, qoipp::Channels::RGB, desc.m_colorspace
-        };
+        auto rgbDesc  = qoipp::ImageDesc{ desc.width, desc.height, qoipp::Channels::RGB, desc.colorspace };
 
         const auto [decoded, actualdesc] = qoipp::decode(qoiImage, qoipp::Channels::RGB);
         ut::expect(actualdesc == rgbDesc);
@@ -368,10 +356,10 @@ ut::suite fourChannelImage = [] {
 
         qoipp::Image decoded;
         ut::expect(ut::nothrow([&] { decoded = qoipp::decodeFromFile(qoifile); }));
-        ut::expect(decoded.m_desc == desc);
-        ut::expect(ut::that % decoded.m_data.size() == rawImage.size());
-        ut::expect(std::memcmp(decoded.m_data.data(), rawImage.data(), rawImage.size()) == 0)
-            << compare(rawImage, decoded.m_data);
+        ut::expect(decoded.desc == desc);
+        ut::expect(ut::that % decoded.data.size() == rawImage.size());
+        ut::expect(std::memcmp(decoded.data.data(), rawImage.data(), rawImage.size()) == 0)
+            << compare(rawImage, decoded.data);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         ut::expect(fs::is_empty(qoifile));
@@ -387,10 +375,11 @@ ut::suite fourChannelImage = [] {
         ut::expect(header.has_value()) << "Invalid header";
         ut::expect(*header == desc);
 
-        const auto emptyHeader = qoipp::readHeader(ByteVec{});
+        const auto emptyHeader = qoipp::readHeader(Vec{});
         ut::expect(!emptyHeader.has_value());
 
-        const auto invalidHeader = qoipp::readHeader(toBytes({ 0x00, 0x01, 0x02, 0x03 }));
+        const auto invalidHeaderStr = Vec{ 0x00, 0x01, 0x02, 0x03 };
+        const auto invalidHeader    = qoipp::readHeader(invalidHeaderStr);
         ut::expect(!invalidHeader.has_value());
     };
 
@@ -430,12 +419,12 @@ ut::suite testingOnRealImage = [] {
             "png images round trip test compared to reference"_test = [&] {
                 const auto image      = loadImageStb(entry.path());
                 const auto qoiImage   = qoiEncode(image);
-                const auto qoippImage = qoipp::encode(image.m_data, image.m_desc);
+                const auto qoippImage = qoipp::encode(image.data, image.desc);
 
-                ut::expect(ut::that % qoiImage.m_data.size() == qoippImage.size());
-                ut::expect(qoiImage.m_desc == image.m_desc);
-                ut::expect(std::memcmp(qoiImage.m_data.data(), qoippImage.data(), qoippImage.size()) == 0)
-                    << compare(qoiImage.m_data, qoippImage);
+                ut::expect(ut::that % qoiImage.data.size() == qoippImage.size());
+                ut::expect(qoiImage.desc == image.desc);
+                ut::expect(std::memcmp(qoiImage.data.data(), qoippImage.data(), qoippImage.size()) == 0)
+                    << compare(qoiImage.data, qoippImage);
             };
         }
         if (entry.path().extension() == ".qoi") {
