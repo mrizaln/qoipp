@@ -531,7 +531,9 @@ namespace qoipp::impl
 
         Pixel prevPixel = constants::start;
 
-        const auto        get = [&](usize index) -> u8 { return std::to_integer<u8>(data[index]); };
+        const auto get = [&](usize index) -> u8 {
+            return index < data.size() ? std::to_integer<u8>(data[index]) : 0x00;
+        };
         PixelWriter<Dest> write{ decodedData };
 
         seenPixels[hash(prevPixel) % constants::runningArraySize] = prevPixel;
@@ -596,12 +598,16 @@ namespace qoipp::impl
                 } break;
                 case T::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::biasOpRun;
-                    while (run-- > 0) {
+                    while (run-- > 0 and pixelIndex < width * height) {
                         write(pixelIndex++, prevPixel);
                     }
                     --pixelIndex;
+                    if (pixelIndex >= width * height) {
+                        break;
+                    }
+                    continue;
                 } break;
-                default: [[unlikely]] /* invalid tag (is this eve possible?)*/;
+                default: [[unlikely]] /* invalid tag (is this even possible?)*/;
                 }
             }
 
