@@ -23,8 +23,8 @@
 
 namespace fs = std::filesystem;
 
+using qoipp::Desc;
 using qoipp::Image;
-using qoipp::ImageDesc;
 using qoipp::Span;
 using qoipp::Vec;
 
@@ -34,7 +34,7 @@ struct StbImage
     using UniqueData = std::unique_ptr<Data, decltype([](Data* data) { stbi_image_free(data); })>;
 
     UniqueData data;
-    ImageDesc  desc;
+    Desc       desc;
 };
 
 struct ImageVar
@@ -47,9 +47,9 @@ struct ImageVar
         using Ts::operator()...;
     };
 
-    std::pair<Span, ImageDesc> get() const
+    std::pair<Span, Desc> get() const
     {
-        const auto tup = std::make_pair<Span, const ImageDesc&>;
+        const auto tup = std::make_pair<Span, const Desc&>;
         return std::visit(
             Overloaded{
                 [&](const Image& d) { return tup(d.data, d.desc); },
@@ -67,7 +67,7 @@ struct ImageVar
     {
         const auto& [_, desc]                      = get();
         auto [width, height, channels, colorspace] = desc;
-        fmt::println("ImageDesc:");
+        fmt::println("Desc:");
         fmt::println("\twidth     : {}", width);
         fmt::println("\theight    : {}", height);
         fmt::println("\tchannels  : {}", channels == qoipp::Channels::RGB ? "RGB" : "RGBA");
