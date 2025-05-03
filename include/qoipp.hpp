@@ -3,10 +3,10 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
-#include <functional>
 
 namespace qoipp
 {
@@ -52,6 +52,38 @@ namespace qoipp
     };
 
     using PixelGenFun = std::function<PixelRepr(std::size_t pixel_index)>;
+
+    /**
+     * @brief Helper function to convert a number of channels to the Channels enum
+     *
+     * @param channels The number of channels
+     * @return std::optional<Channels> The corresponding Channels, or std::nullopt if number is not valid
+     */
+    template <std::integral T>
+    inline constexpr std::optional<Channels> to_channels(T channels) noexcept
+    {
+        switch (channels) {
+        case 3: return Channels::RGB;
+        case 4: return Channels::RGBA;
+        default: return std::nullopt;
+        }
+    }
+
+    /**
+     * @brief Helper function to convert a number of colorspace to the Colorspace enum
+     *
+     * @param colorspace The number of colorspace
+     * @return std::optional<Colorspace> The corresponding Colorspace, or std::nullopt if number is not valid
+     */
+    template <std::integral T>
+    inline constexpr std::optional<Colorspace> to_colorspace(T colorspace) noexcept
+    {
+        switch (colorspace) {
+        case 0: return Colorspace::sRGB;
+        case 1: return Colorspace::Linear;
+        default: return std::nullopt;
+        }
+    }
 
     /**
      * @brief Read the header of a QOI image
