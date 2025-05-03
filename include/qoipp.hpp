@@ -25,33 +25,33 @@ namespace qoipp
         RGBA = 4,
     };
 
-    struct PixelRepr
+    struct Pixel
     {
         std::uint8_t r;
         std::uint8_t g;
         std::uint8_t b;
         std::uint8_t a;
 
-        constexpr auto operator<=>(const PixelRepr&) const = default;
+        constexpr auto operator<=>(const Pixel&) const = default;
     };
 
-    struct ImageDesc
+    struct Desc
     {
         std::uint32_t width;
         std::uint32_t height;
         Channels      channels;
         Colorspace    colorspace;
 
-        constexpr auto operator<=>(const ImageDesc&) const = default;
+        constexpr auto operator<=>(const Desc&) const = default;
     };
 
     struct Image
     {
-        Vec       data;
-        ImageDesc desc;
+        Vec  data;
+        Desc desc;
     };
 
-    using PixelGenFun = std::function<PixelRepr(std::size_t pixel_index)>;
+    using PixelGenFun = std::function<Pixel(std::size_t pixel_index)>;
 
     /**
      * @brief Helper function to convert a number of channels to the Channels enum
@@ -89,9 +89,9 @@ namespace qoipp
      * @brief Read the header of a QOI image
      *
      * @param data The data to read the header from
-     * @return std::optional<ImageDesc> The description of the image if it is a valid QOI image
+     * @return std::optional<Desc> The description of the image if it is a valid QOI image
      */
-    std::optional<ImageDesc> read_header(Span data) noexcept;
+    std::optional<Desc> read_header(Span data) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image
@@ -103,7 +103,7 @@ namespace qoipp
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    Vec encode(Span data, ImageDesc desc) noexcept(false);
+    Vec encode(Span data, Desc desc) noexcept(false);
 
     /**
      * @brief Encode the given data into a QOI image
@@ -115,7 +115,7 @@ namespace qoipp
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    inline Vec encode(const void* data, std::size_t size, ImageDesc desc) noexcept(false)
+    inline Vec encode(const void* data, std::size_t size, Desc desc) noexcept(false)
     {
         auto byte_data = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
         return encode(byte_data, desc);
@@ -128,10 +128,11 @@ namespace qoipp
      * @param desc The description of the image
      * @return Vec The encoded image
      *
-     * The function should return the pixel at the given location ((0, 0) is at the top-left corner) in the
-     * format of RGBA8888 (the alpha channel is discarded if the ImageDesc specifies RGB channels only).
+     * The function should return the pixel at the given pixel index. The index 0 starts at top-left corner of
+     * an image and increasing to the right and then down. The alpha channel value is discarded if the
+     * Desc specifies RGB channels only.
      */
-    Vec encode_from_function(PixelGenFun func, ImageDesc desc) noexcept(false);
+    Vec encode_from_function(PixelGenFun func, Desc desc) noexcept(false);
 
     /**
      * @brief Decode the given QOI image
@@ -176,9 +177,9 @@ namespace qoipp
     /**
      * @brief Read the header of a QOI image from a file
      * @param path The path to the file
-     * @return std::optional<ImageDesc> The description of the image (std::nullopt if it's invalid)
+     * @return std::optional<Desc> The description of the image (std::nullopt if it's invalid)
      */
-    std::optional<ImageDesc> read_header_from_file(const std::filesystem::path& path) noexcept;
+    std::optional<Desc> read_header_from_file(const std::filesystem::path& path) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image and write it to a file
@@ -192,7 +193,7 @@ namespace qoipp
     void encode_to_file(
         const std::filesystem::path& path,
         Span                         data,
-        ImageDesc                    desc,
+        Desc                         desc,
         bool                         overwrite = false
     ) noexcept(false);
 
