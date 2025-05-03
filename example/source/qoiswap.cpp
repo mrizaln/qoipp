@@ -42,7 +42,7 @@ int main(int argc, char** argv)
     {
         qoipp::Image& image;
 
-        qoipp::PixelRepr operator()(std::size_t index) const
+        qoipp::Pixel operator()(std::size_t index) const
         {
             auto& [data, desc] = image;
             auto idx           = index * static_cast<std::size_t>(desc.channels);

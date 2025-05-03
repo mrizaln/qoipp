@@ -150,7 +150,7 @@ int main(int argc, char* argv[])
 
     CLI11_PARSE(app, argc, argv);
 
-    auto desc = qoipp::ImageDesc{
+    auto desc = qoipp::Desc{
         .width      = width,
         .height     = height,
         .channels   = channels,
