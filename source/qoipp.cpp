@@ -84,9 +84,13 @@ namespace qoipp
     };
     static_assert(std::is_trivial_v<Pixel>);
 
+    template <class T>
+    std::decay_t<T> decay_copy(T&&);
+
     template <typename T>
-    concept PixelReader = requires(const T ct, usize idx) {
+    concept PixelReader = requires (const T ct, T t, usize idx) {
         { ct.read(idx) } -> std::same_as<Pixel>;
+        { decay_copy(t.channels) } -> std::same_as<Channels>;
     };
 }
 
@@ -316,7 +320,7 @@ namespace qoipp::impl
         }
 
         template <typename T>
-            requires(data::op::Op<T> or AnyOf<T, data::QoiHeader, data::EndMarker>)
+            requires (data::op::Op<T> or AnyOf<T, data::QoiHeader, data::EndMarker>)
         void push(T&& t) noexcept
         {
             m_index = t.write(m_bytes, m_index);
@@ -333,76 +337,52 @@ namespace qoipp::impl
         usize m_index = 0;
     };
 
-    // TODO: make Channels parameter a runtime value instead
-    template <Channels Chan>
-    struct PixelWriter
+    struct SimplePixelWriter
     {
         std::span<u8> dest;
+        Channels      channels;
 
         void operator()(usize index, const Pixel& pixel) noexcept
         {
-            const auto data_index = index * static_cast<usize>(Chan);
-            if constexpr (Chan == Channels::RGB) {
-                std::memcpy(dest.data() + data_index, &pixel, 3);
+            const auto offset = index * static_cast<usize>(channels);
+            if (channels == Channels::RGBA) {
+                std::memcpy(dest.data() + offset, &pixel, 4);
             } else {
-                std::memcpy(dest.data() + data_index, &pixel, 4);
+                std::memcpy(dest.data() + offset, &pixel, 3);
             }
         }
     };
 
-    // TODO: make Channels parameter a runtime value instead
-    template <Channels Chan>
     struct SimplePixelReader
     {
         std::span<const u8> data;
+        Channels            channels;
 
         Pixel read(usize index) const noexcept
         {
-            const auto data_index = index * static_cast<usize>(Chan);
-
-            if constexpr (Chan == Channels::RGBA) {
-                return {
-                    .r = data[data_index + 0],
-                    .g = data[data_index + 1],
-                    .b = data[data_index + 2],
-                    .a = data[data_index + 3],
-                };
+            const auto offset = index * static_cast<usize>(channels);
+            if (channels == Channels::RGBA) {
+                return { data[offset + 0], data[offset + 1], data[offset + 2], data[offset + 3] };
             } else {
-                return {
-                    .r = data[data_index + 0],
-                    .g = data[data_index + 1],
-                    .b = data[data_index + 2],
-                    .a = 0xFF,
-                };
+                return { data[offset + 0], data[offset + 1], data[offset + 2], 0xFF };
             }
         }
     };
-    static_assert(qoipp::PixelReader<SimplePixelReader<Channels::RGB>>);
+    static_assert(qoipp::PixelReader<SimplePixelReader>);
 
     // TODO: make Channels parameter a runtime value instead
-    template <Channels Chan>
     struct FuncPixelReader
     {
         PixelGenFun func;
-        u32         width;
+        Channels    channels;
 
         Pixel read(usize index) const noexcept
         {
             auto repr = func(index);
-            if constexpr (Chan == Channels::RGBA) {
-                return {
-                    .r = repr.r,
-                    .g = repr.g,
-                    .b = repr.b,
-                    .a = repr.a,
-                };
+            if (channels == Channels::RGBA) {
+                return std::bit_cast<Pixel>(repr);
             } else {
-                return {
-                    .r = repr.r,
-                    .g = repr.g,
-                    .b = repr.b,
-                    .a = 0xFF,
-                };
+                return { repr.r, repr.g, repr.b, 0xFF };
             }
         }
     };
@@ -413,12 +393,12 @@ namespace qoipp::impl
         return (r * 3 + g * 5 + b * 7 + a * 11);
     }
 
-    template <Channels Chan, template <Channels> typename Reader>
-    Vec encode(Reader<Chan> reader, u32 width, u32 height, bool srgb)
+    template <PixelReader Reader>
+    Vec encode(Reader reader, Channels channels, u32 width, u32 height, bool srgb)
     {
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const usize max_size = width * height * (static_cast<usize>(Chan) + 1) + constants::header_size
-                             + constants::end_marker.size();
+        const usize max_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
+                             + constants::header_size + constants::end_marker.size();
 
         auto chunks      = DataChunkArray{ max_size };    // the encoded data goes here
         auto seen_pixels = RunningArray{};
@@ -428,7 +408,7 @@ namespace qoipp::impl
         chunks.push(data::QoiHeader{
             .width      = width,
             .height     = height,
-            .channels   = static_cast<u8>(Chan),
+            .channels   = static_cast<u8>(channels),
             .colorspace = static_cast<u8>(srgb ? 0 : 1),
         });
 
@@ -463,7 +443,7 @@ namespace qoipp::impl
                 } else {
                     seen_pixels[index] = curr_pixel;
 
-                    if constexpr (Chan == Channels::RGBA) {
+                    if (reader.channels == Channels::RGBA) {
                         if (prev_pixel.a != curr_pixel.a) {
                             // OP_RGBA
                             chunks.push(data::op::Rgba{
@@ -517,10 +497,16 @@ namespace qoipp::impl
         return chunks.get();
     }
 
-    template <Channels Src, Channels Dest = Src>
-    Vec decode(std::span<const u8> data, usize width, usize height, bool flip_vertically) noexcept(false)
+    Vec decode(
+        std::span<const u8> data,
+        Channels            src,
+        Channels            dest,
+        usize               width,
+        usize               height,
+        bool                flip_vertically
+    ) noexcept(false)
     {
-        auto decoded     = Vec(width * height * static_cast<u8>(Dest));
+        auto decoded     = Vec(width * height * static_cast<u8>(dest));
         auto seen_pixels = RunningArray{};
 
         // seen_pixels.fill({ 0x00, 0x00, 0x00, 0x00 });
@@ -528,7 +514,7 @@ namespace qoipp::impl
         auto prev_pixel = constants::start;
 
         const auto get   = [&](usize index) -> u8 { return index < data.size() ? data[index] : 0x00; };
-        auto       write = PixelWriter<Dest>{ decoded };
+        auto       write = SimplePixelWriter{ decoded, dest };
 
         seen_pixels[hash(prev_pixel) % constants::running_array_size] = prev_pixel;
 
@@ -546,7 +532,7 @@ namespace qoipp::impl
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if constexpr (Src == Channels::RGBA) {
+                if (src == Channels::RGBA) {
                     curr_pixel.a = prev_pixel.a;
                 }
             } break;
@@ -554,7 +540,7 @@ namespace qoipp::impl
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if constexpr (Src == Channels::RGBA) {
+                if (src == Channels::RGBA) {
                     curr_pixel.a = get(data_index++);
                 }
             } break;
@@ -572,7 +558,7 @@ namespace qoipp::impl
                     curr_pixel.r = static_cast<u8>(dr + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(db + prev_pixel.b);
-                    if constexpr (Src == Channels::RGBA) {
+                    if (src == Channels::RGBA) {
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
@@ -586,7 +572,7 @@ namespace qoipp::impl
                     curr_pixel.r = static_cast<u8>(dg + dr_dg + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(dg + db_dg + prev_pixel.b);
-                    if constexpr (Src == Channels::RGBA) {
+                    if (src == Channels::RGBA) {
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
@@ -610,7 +596,7 @@ namespace qoipp::impl
         }
 
         if (flip_vertically) {
-            auto linesize = width * static_cast<usize>(Dest);
+            const auto linesize = width * static_cast<usize>(dest);
             for (auto y : sv::iota(0u, height / 2)) {
                 auto* line1 = decoded.data() + y * linesize;
                 auto* line2 = decoded.data() + (height - y - 1) * linesize;
@@ -691,14 +677,8 @@ namespace qoipp
             };
         }
 
-        const auto is_srgb = colorspace == Colorspace::sRGB;
-        if (channels == Channels::RGB) {
-            auto reader = impl::SimplePixelReader<Channels::RGB>{ data };
-            return impl::encode(reader, width, height, is_srgb);
-        } else {
-            auto reader = impl::SimplePixelReader<Channels::RGBA>{ data };
-            return impl::encode(reader, width, height, is_srgb);
-        }
+        const auto reader = impl::SimplePixelReader{ data, channels };
+        return impl::encode(reader, channels, width, height, colorspace == Colorspace::sRGB);
     }
 
     Vec encode_from_function(PixelGenFun func, ImageDesc desc) noexcept(false)
@@ -711,14 +691,8 @@ namespace qoipp
             ) };
         }
 
-        const auto is_srgb = colorspace == Colorspace::sRGB;
-        if (channels == Channels::RGB) {
-            auto reader = impl::FuncPixelReader<Channels::RGB>{ std::move(func), width };
-            return impl::encode(reader, width, height, is_srgb);
-        } else {
-            auto reader = impl::FuncPixelReader<Channels::RGBA>{ std::move(func), width };
-            return impl::encode(reader, width, height, is_srgb);
-        }
+        const auto reader = impl::FuncPixelReader{ std::move(func), channels };
+        return impl::encode(reader, channels, width, height, colorspace == Colorspace::sRGB);
     }
 
     Image decode(Span data, std::optional<Channels> target, bool flip_vertically) noexcept(false)
@@ -727,41 +701,22 @@ namespace qoipp
             throw std::invalid_argument{ "Data is empty" };
         }
 
-        auto desc = [&] {
-            if (auto header = read_header(data); header.has_value()) {
-                return header.value();
-            } else {
-                throw std::invalid_argument{ "Invalid header" };
-            }
-        }();
-
-        const auto& [width, height, channels, colorspace] = desc;
-
-        auto want = target.value_or(channels);
-
-        if (channels == Channels::RGBA and want == Channels::RGBA) {
-            return {
-                .data = impl::decode<Channels::RGBA, Channels::RGBA>(data, width, height, flip_vertically),
-                .desc = desc,
-            };
-        } else if (channels == Channels::RGB and want == Channels::RGB) {
-            return {
-                .data = impl::decode<Channels::RGB, Channels::RGB>(data, width, height, flip_vertically),
-                .desc = desc,
-            };
-        } else if (channels == Channels::RGBA and want == Channels::RGB) {
-            desc.channels = Channels::RGB;
-            return {
-                .data = impl::decode<Channels::RGBA, Channels::RGB>(data, width, height, flip_vertically),
-                .desc = desc,
-            };
-        } else {
-            desc.channels = Channels::RGBA;
-            return {
-                .data = impl::decode<Channels::RGB, Channels::RGBA>(data, width, height, flip_vertically),
-                .desc = desc,
-            };
+        auto header = read_header(data);
+        if (not header.has_value()) {
+            throw std::invalid_argument{ "Invalid header" };
         }
+
+        auto& [width, height, channels, colorspace] = header.value();
+
+        const auto src  = channels;
+        const auto dest = target.value_or(channels);
+
+        channels = dest;
+
+        return {
+            .data = impl::decode(data, src, dest, width, height, flip_vertically),
+            .desc = header.value(),
+        };
     }
 
     std::optional<ImageDesc> read_header_from_file(const std::filesystem::path& path) noexcept
