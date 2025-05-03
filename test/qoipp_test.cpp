@@ -51,6 +51,7 @@ using namespace ut::operators;
 using qoipp::Image;
 
 static inline const fs::path g_test_image_dir = fs::current_path() / "qoi_test_images";
+static constexpr auto        g_do_test_images = true;
 
 // ----------------
 // helper functions
@@ -181,6 +182,16 @@ std::string compare(Span lhs, Span rhs)
         }
     }
 
+    if (lhs.size() != rhs.size()) {
+        auto min    = std::min(lhs.size(), rhs.size());
+        auto remain = std::abs((i32)lhs.size() - (i32)rhs.size());
+        result += fmt::format("{} elements remain [{}]\n", remain, lhs.size() > rhs.size() ? "lhs" : "rhs");
+        auto remaining = (lhs.size() > rhs.size() ? lhs : rhs) | rv::drop(min);
+        for (const auto& [i, byte] : rv::enumerate(remaining)) {
+            result += fmt::format(fg(fmt::color::orange_red), "{}: {:#04x}\n", i + min, byte);
+        }
+    }
+
     auto size_diff = (i32)lhs.size() - (i32)rhs.size();
     auto min       = std::min(lhs.size(), rhs.size());
 
@@ -196,7 +207,7 @@ std::string compare(Span lhs, Span rhs)
 // ----------------------
 
 ut::suite three_channel_image = [] {
-    constexpr qoipp::ImageDesc desc{
+    constexpr qoipp::Desc desc{
         .width      = 29,
         .height     = 17,
         .channels   = qoipp::Channels::RGB,
@@ -298,7 +309,7 @@ ut::suite three_channel_image = [] {
 };
 
 ut::suite four_channel_image = [] {
-    constexpr qoipp::ImageDesc desc{
+    constexpr qoipp::Desc desc{
         .width      = 24,
         .height     = 14,
         .channels   = qoipp::Channels::RGBA,
@@ -319,7 +330,7 @@ ut::suite four_channel_image = [] {
 
     "4-channel image encode"_test = [&] {
         const auto encoded = qoipp::encode(raw_image, desc);
-        ut::expect(encoded.size() == qoi_image.size());
+        ut::expect(ut::that % encoded.size() == qoi_image.size());
         ut::expect(std::memcmp(encoded.data(), qoi_image.data(), qoi_image.size()) == 0)
             << compare(qoi_image, encoded);
     };
@@ -334,7 +345,7 @@ ut::suite four_channel_image = [] {
 
     "4-channel image decode wants RGB only"_test = [&] {
         auto rgb_image = rbg_only(raw_image);
-        auto rgb_desc  = qoipp::ImageDesc{ desc.width, desc.height, qoipp::Channels::RGB, desc.colorspace };
+        auto rgb_desc  = qoipp::Desc{ desc.width, desc.height, qoipp::Channels::RGB, desc.colorspace };
 
         const auto [decoded, actualdesc] = qoipp::decode(qoi_image, qoipp::Channels::RGB);
         ut::expect(actualdesc == rgb_desc);
@@ -404,6 +415,12 @@ ut::suite four_channel_image = [] {
 };
 
 ut::suite testing_on_real_images = [] {
+    if (not g_do_test_images) {
+        return;
+    }
+
+    fmt::print("Testing on real images...\n");
+
     if (!fs::exists(g_test_image_dir)) {
         fmt::println("Test image directory '{}' does not exist, skipping test", g_test_image_dir);
         fmt::println("Use the `fetch_test_images.sh` script to download the test images");
@@ -412,6 +429,8 @@ ut::suite testing_on_real_images = [] {
 
     for (auto entry : fs::directory_iterator{ g_test_image_dir }) {
         if (entry.path().extension() == ".png") {
+            fmt::print("Testing encode on '{}'\n", entry.path().filename());
+
             "png images round trip test compared to reference"_test = [&] {
                 const auto image       = load_image_stb(entry.path());
                 const auto qoi_image   = qoi_encode(image);
@@ -424,6 +443,8 @@ ut::suite testing_on_real_images = [] {
             };
         }
         if (entry.path().extension() == ".qoi") {
+            fmt::print("Testing decode on '{}'\n", entry.path().filename());
+
             "qoipp decode compared to reference"_test = [&] {
                 auto qoi_image = read_file(entry.path());
 
