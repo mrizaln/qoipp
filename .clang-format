@@ -220,3 +220,7 @@ SpacesInSquareBrackets: false
 Standard: Latest
 TabWidth: 4
 UseTab: Never
+IfMacros:
+  - DO_TIME
+  - DO_TIME_MS
+  - DO_TIME_US

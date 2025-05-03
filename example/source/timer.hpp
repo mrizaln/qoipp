@@ -111,10 +111,8 @@ namespace timer_detail
     };
 }
 
-#define DO_TIME_US(Cstr)                                                                           \
-    timer_detail::TimerCallerDummy<std::chrono::microseconds>{ "[DO_TIME] " Cstr }* [&]()
-#define DO_TIME_MS(Cstr)                                                                           \
-    timer_detail::TimerCallerDummy<std::chrono::milliseconds>{ "[DO_TIME] " Cstr }* [&]()
-#define DO_TIME(Cstr) DO_TIME_MS (Cstr)
+#define DO_TIME_US(Cstr) timer_detail::TimerCallerDummy<std::chrono::microseconds>{ "[DO_TIME] " Cstr }* [&]()
+#define DO_TIME_MS(Cstr) timer_detail::TimerCallerDummy<std::chrono::milliseconds>{ "[DO_TIME] " Cstr }* [&]()
+#define DO_TIME(Cstr)    DO_TIME_MS (Cstr)
 
 #endif /* ifndef TIMER_HPP */

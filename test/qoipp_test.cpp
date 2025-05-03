@@ -8,17 +8,17 @@
 #include <stb_image.h>
 
 #include <boost/ut.hpp>
+#include <fmt/color.h>
 #include <fmt/core.h>
 #include <fmt/std.h>
-#include <fmt/color.h>
 #include <range/v3/view.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <cstdio>
-#include <fstream>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace rv = ranges::views;
