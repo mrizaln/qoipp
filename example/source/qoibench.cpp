@@ -1,8 +1,8 @@
 #include <qoipp.hpp>
 #define QOI_IMPLEMENTATION
+#include <fpng.h>
 #include <qoi.h>
 #include <qoixx.hpp>
-#include <fpng.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -12,9 +12,9 @@
 #include <stb_image_write.h>
 
 #include <CLI/CLI.hpp>
+#include <fmt/color.h>
 #include <fmt/core.h>
 #include <fmt/std.h>
-#include <fmt/color.h>
 
 #include <chrono>
 #include <exception>
@@ -183,7 +183,7 @@ struct BenchmarkResult
     };
 
     void print_header(auto&&... c) const
-        requires(sizeof...(c) == 9)
+        requires (sizeof...(c) == 9)
     {
         fmt::println(
             "┃ {:^8} ┃ {:^9} ┃ {:^9} ┃ {:^12} ┃ {:^12} ┃ {:^6} ┃ {:^6} ┃ {:^10} ┃ {:^8} ┃",
@@ -192,7 +192,7 @@ struct BenchmarkResult
     };
 
     void print_row(auto&&... c) const
-        requires(sizeof...(c) == 9)
+        requires (sizeof...(c) == 9)
     {
         //   | name  | enc      | dec      | enc/px    | dec/px    | enc%    | dec%    | size   | ratio      |
         fmt::println(
@@ -323,14 +323,18 @@ RawImage load_image(const fs::path& file)
         throw std::runtime_error{ fmt::format("Error decoding file '{}' (stb)", file) };
     }
 
-    auto size = static_cast<size_t>(width * height * channels);
+    auto size          = static_cast<size_t>(width * height * channels);
+    auto channels_real = qoipp::to_channels(channels);
+    if (not channels_real) {
+        throw std::runtime_error{ fmt::format("Number of channels ({}) is not supported (stb)", channels) };
+    }
 
     auto image = RawImage{
         .data = { data, data + size },
         .desc = {
             .width      = static_cast<unsigned int>(width),
             .height     = static_cast<unsigned int>(height),
-            .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .channels   = *channels_real,
             .colorspace = qoipp::Colorspace::sRGB,
         },
     };
@@ -339,18 +343,18 @@ RawImage load_image(const fs::path& file)
     return image;
 }
 
-EncodeResult<> qoi_encode_wrapper(const RawImage& im)
+EncodeResult<> qoi_encode_wrapper(const RawImage& image)
 {
     auto desc = qoi_desc{
-        .width      = static_cast<unsigned int>(im.desc.width),
-        .height     = static_cast<unsigned int>(im.desc.height),
-        .channels   = (unsigned char)(im.desc.channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = (unsigned char)(im.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR),
+        .width      = static_cast<unsigned int>(image.desc.width),
+        .height     = static_cast<unsigned int>(image.desc.height),
+        .channels   = static_cast<unsigned char>(image.desc.channels),
+        .colorspace = static_cast<unsigned char>(image.desc.colorspace),
     };
 
     int   len;
     auto  timepoint = Clock::now();
-    auto* data      = qoi_encode(im.data.data(), &desc, &len);
+    auto* data      = qoi_encode(image.data.data(), &desc, &len);
     auto  duration  = Clock::now() - timepoint;
 
     if (!data) {
@@ -362,7 +366,7 @@ EncodeResult<> qoi_encode_wrapper(const RawImage& im)
     auto result = EncodeResult{
         .image = {
             .data  = { byte_ptr, byte_ptr + len },
-            .desc  = im.desc,
+            .desc  = image.desc,
         },
         .time = duration,
     };
@@ -392,7 +396,7 @@ DecodeResult qoi_decode_wrapper(const QoiImage& image)
             .desc = {
                 .width      = desc.width,
                 .height     = desc.height,
-                .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+                .channels   = qoipp::to_channels(desc.channels).value(),        // always RGB or RGBA
                 .colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
             },
         },
@@ -410,9 +414,8 @@ EncodeResult<> qoixx_encode(const RawImage& image)
     auto desc = qoixx::qoi::desc{
         .width      = image.desc.width,
         .height     = image.desc.height,
-        .channels   = std::uint8_t(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = image.desc.colorspace == qoipp::Colorspace::sRGB ? qoixx::qoi::colorspace::srgb
-                                                                       : qoixx::qoi::colorspace::linear,
+        .channels   = static_cast<std::uint8_t>(image.desc.channels),
+        .colorspace = static_cast<qoixx::qoi::colorspace>(image.desc.colorspace),
     };
 
     auto timepoint = Clock::now();
@@ -436,9 +439,8 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
     auto qoipp_desc = qoipp::ImageDesc{
         .width      = desc.width,
         .height     = desc.height,
-        .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-        .colorspace = desc.colorspace == qoixx::qoi::colorspace::srgb ? qoipp::Colorspace::sRGB
-                                                                      : qoipp::Colorspace::Linear,
+        .channels   = qoipp::to_channels(desc.channels).value(),    // always RGB or RGBA
+        .colorspace = qoipp::to_colorspace(static_cast<std::uint8_t>(desc.colorspace)).value(),
     };
 
     return {
@@ -516,13 +518,18 @@ DecodeResult stb_decode(const PngImage& image)
     auto duration = Clock::now() - timepoint;
     auto size     = static_cast<size_t>(width * height * channels);
 
+    auto channels_real = qoipp::to_channels(channels);
+    if (not channels_real) {
+        throw std::runtime_error{ fmt::format("Number of channels ({}) is not supported (stb)", channels) };
+    }
+
     auto result = DecodeResult{
         .image = {
             .data = { data, data + size },
             .desc = {
                 .width      = static_cast<unsigned int>(width),
                 .height     = static_cast<unsigned int>(height),
-                .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+                .channels   = *channels_real,
                 .colorspace = qoipp::Colorspace::sRGB,
             },
         },
@@ -579,6 +586,10 @@ DecodeResult fpng_decode(const PngImage& image)
     if (success != fpng::FPNG_DECODE_SUCCESS) {
         throw std::runtime_error{ "Error decoding image (fpng)" };
     }
+    auto channels_real = qoipp::to_channels(channels);
+    if (not channels_real) {
+        throw std::runtime_error{ fmt::format("Number of channels ({}) is not supported (fpng)", channels) };
+    }
 
     return {
         .image = {
@@ -586,7 +597,7 @@ DecodeResult fpng_decode(const PngImage& image)
             .desc = {
                 .width      = width,
                 .height     = height,
-                .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+                .channels   = *channels_real,
                 .colorspace = qoipp::Colorspace::sRGB,
             },
         },
@@ -605,7 +616,7 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
 
     if (opt.verify) {
         const auto verify = [&]<typename T>(const T& left_image, const T& right_image)
-            requires(std::same_as<T, RawImage> or std::same_as<T, QoiImage>)
+            requires (std::same_as<T, RawImage> or std::same_as<T, QoiImage>)
         {
             if (left_image.data != right_image.data || left_image.desc != right_image.desc) {
                 fmt::println("\t\tVerification failed for {} [skipped]", file);
@@ -737,14 +748,23 @@ std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Opt
 {
     auto results = std::vector<BenchmarkResult>{};
 
+    auto benchmark_file = [&](const fs::path& file) {
+        try {
+            auto result = benchmark(file, opt);
+            result.print(opt.color);
+            results.push_back(result);
+        } catch (const std::exception& e) {
+            fmt::println("\t\tBenchmarking failed for '{}' (exception): {}", file, e.what());
+            fmt::println("\t\tSkipping file '{}'", file);
+        }
+    };
+
     if (opt.recurse) {
         fmt::println(">> Benchmarking {} (recurse)...", path / "**/*.png");
 
         for (const auto& path : fs::recursive_directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
-                auto result = benchmark(path, opt);
-                result.print(opt.color);
-                results.push_back(result);
+                benchmark_file(path.path());
             }
         }
     } else {
@@ -752,9 +772,7 @@ std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Opt
 
         for (const auto& path : fs::directory_iterator{ path }) {
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
-                auto result = benchmark(path, opt);
-                result.print(opt.color);
-                results.push_back(result);
+                benchmark_file(path.path());
             }
         }
     }
@@ -828,8 +846,13 @@ try {
         auto summary = average_results(results);
         summary.print(opt.color);
     } else if (fs::is_regular_file(dirpath) and dirpath.extension() == ".png") {
-        auto result = benchmark(dirpath, opt);
-        result.print(opt.color);
+        try {
+            auto result = benchmark(dirpath, opt);
+            result.print(opt.color);
+        } catch (const std::exception& e) {
+            fmt::println("\t>> Benchmarking failed for '{}' (exception): {}", dirpath, e.what());
+            return 1;
+        }
     } else {
         fmt::println("'{}' is not a directory nor a png file", dirpath);
         return 1;

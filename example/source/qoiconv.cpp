@@ -6,20 +6,20 @@
 #define STBI_ONLY_PNG
 #include <stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#include <fmt/core.h>
 #include <CLI/CLI.hpp>
+#include <fmt/core.h>
+#include <stb_image_write.h>
 
-#include <stdexcept>
-#include <utility>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <tuple>
+#include <utility>
 #include <variant>
-#include <format>
 
 namespace fs = std::filesystem;
 
@@ -120,12 +120,17 @@ ImageVar read_png(const fs::path& filepath)
         throw std::runtime_error{ std::format("Failed to load PNG image '{}'", filepath.c_str()) };
     }
 
+    auto channels_real = qoipp::to_channels(channels);
+    if (not channels_real.has_value()) {
+        throw std::runtime_error{ std::format("{} number of channels is not supported", channels) };
+    }
+
     return { StbImage{
         .data = StbImage::UniqueData{ data },
         .desc = {
             .width      = static_cast<unsigned int>(width),
             .height     = static_cast<unsigned int>(height),
-            .channels   = channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .channels   = *channels_real,
             .colorspace = qoipp::Colorspace::sRGB,    // dummy; unused
         },
     } };
