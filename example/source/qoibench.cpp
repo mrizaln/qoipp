@@ -69,20 +69,20 @@ namespace lib
 
 struct RawImage
 {
-    qoipp::Vec       data;
-    qoipp::ImageDesc desc;
+    qoipp::Vec  data;
+    qoipp::Desc desc;
 };
 
 struct QoiImage
 {
-    qoipp::Vec       data;
-    qoipp::ImageDesc desc;
+    qoipp::Vec  data;
+    qoipp::Desc desc;
 };
 
 struct PngImage
 {
-    qoipp::Vec       data;
-    qoipp::ImageDesc desc;
+    qoipp::Vec  data;
+    qoipp::Desc desc;
 };
 
 template <typename Image = QoiImage>
@@ -98,7 +98,7 @@ struct DecodeResult
     Duration time;
 };
 
-auto desc_string(const qoipp::ImageDesc& desc)
+auto desc_string(const qoipp::Desc& desc)
 {
     return fmt::format(
         "{}x{} ({}|{})",
@@ -113,7 +113,6 @@ struct Options
 {
     bool         warmup      = true;
     bool         verify      = true;
-    bool         reference   = true;
     bool         encode      = true;
     bool         decode      = true;
     bool         recurse     = true;
@@ -121,6 +120,9 @@ struct Options
     bool         color       = true;
     bool         stb         = true;
     bool         fpng        = true;
+    bool         qoi         = true;
+    bool         qoixx       = true;
+    bool         qoipp       = true;
     unsigned int runs        = 1;
 
     void configure(CLI::App& app)
@@ -129,13 +131,15 @@ struct Options
 
         app.add_flag("!--no-warmup", warmup, "Don't perform a warmup run");
         app.add_flag("!--no-verify", verify, "Don't verify qoi roundtrip");
-        app.add_flag("!--no-reference", reference, "Don't run reference implementation");
         app.add_flag("!--no-encode", encode, "Don't run encoders");
         app.add_flag("!--no-decode", decode, "Don't run decoders");
         app.add_flag("!--no-recurse", recurse, "Don't descend into directories");
         app.add_flag("!--no-color", color, "Don't print with color");
         app.add_flag("!--no-stb", stb, "Don't benchmark stb");
         app.add_flag("!--no-fpng", fpng, "Don't benchmark fpng");
+        app.add_flag("!--no-qoi", qoi, "Don't benchmark qoi");
+        app.add_flag("!--no-qoixx", qoixx, "Don't benchmark qoixx");
+        app.add_flag("!--no-qoipp", qoipp, "Don't benchmark qoipp");
         app.add_flag("--only-totals", only_totals, "Don't print individual image results");
     }
 
@@ -145,13 +149,15 @@ struct Options
         fmt::println("\t- runs      : {}", runs);
         fmt::println("\t- warmup    : {}", warmup);
         fmt::println("\t- verify    : {}", verify);
-        fmt::println("\t- reference : {}", reference);
         fmt::println("\t- encode    : {}", encode);
         fmt::println("\t- decode    : {}", decode);
         fmt::println("\t- recurse   : {}", recurse);
         fmt::println("\t- color     : {}", color);
         fmt::println("\t- stb       : {}", stb);
         fmt::println("\t- fpng      : {}", fpng);
+        fmt::println("\t- qoi       : {}", qoi);
+        fmt::println("\t- qoixx     : {}", qoixx);
+        fmt::println("\t- qoipp     : {}", qoipp);
         fmt::println("\t- onlytotals: {}", only_totals);
     }
 };
@@ -165,9 +171,9 @@ struct BenchmarkResult
         std::size_t encoded_size = 0;
     };
 
-    qoipp::ImageDesc desc     = {};
-    fs::path         file     = {};
-    std::size_t      raw_size = 0;
+    qoipp::Desc desc     = {};
+    fs::path    file     = {};
+    std::size_t raw_size = 0;
 
     std::map<lib::Lib, LibInfo> libs_info = {};
 
@@ -436,7 +442,7 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
     auto [encoded, desc] = qoixx::qoi::decode<T>(image.data);
     auto duration        = Clock::now() - timepoint;
 
-    auto qoipp_desc = qoipp::ImageDesc{
+    auto qoipp_desc = qoipp::Desc{
         .width      = desc.width,
         .height     = desc.height,
         .channels   = qoipp::to_channels(desc.channels).value(),    // always RGB or RGBA
@@ -605,14 +611,11 @@ DecodeResult fpng_decode(const PngImage& image)
     };
 }
 
-BenchmarkResult benchmark(const fs::path& file, const Options& opt)
+BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const Options& opt)
 {
     fmt::println("\t>> Benchmarking '{}'", file);
 
-    auto raw_image      = load_image(file);
-    auto qoi_image      = qoi_encode_wrapper(raw_image).image;
-    auto png_image_fpng = opt.fpng ? fpng_encode(raw_image).image : PngImage{};
-    auto png_image_stb  = opt.stb ? stb_encode(raw_image).image : PngImage{};
+    auto qoi_image = qoi_encode_wrapper(raw_image).image;
 
     if (opt.verify) {
         const auto verify = [&]<typename T>(const T& left_image, const T& right_image)
@@ -683,7 +686,7 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
 
     // the benchmark starts here
 
-    BenchmarkResult result = {
+    auto result = BenchmarkResult{
         .desc     = qoi_image.desc,
         .file     = file,
         .raw_size = raw_image.data.size(),
@@ -692,53 +695,60 @@ BenchmarkResult benchmark(const fs::path& file, const Options& opt)
     fmt::println("\t\tbenchmark");
 
     if (opt.encode) {
-        auto [qoi_time, qoi_size]     = benchmark_impl(qoi_encode_wrapper, raw_image);
-        auto [qoixx_time, qoixx_size] = benchmark_impl(qoixx_encode, raw_image);
-        auto [qoipp_time, qoipp_size] = benchmark_impl(qoipp_encode, raw_image);
-
-        result.libs_info[lib::Lib::qoi].encode_time  = qoi_time;
-        result.libs_info[lib::Lib::qoi].encoded_size = qoi_size;
-
-        result.libs_info[lib::Lib::qoixx].encode_time  = qoixx_time;
-        result.libs_info[lib::Lib::qoixx].encoded_size = qoixx_size;
-
-        result.libs_info[lib::Lib::qoipp].encode_time  = qoipp_time;
-        result.libs_info[lib::Lib::qoipp].encoded_size = qoipp_size;
-
+        // clang-format off
+        if (opt.qoi) {
+            auto [qoi_time, qoi_size] = benchmark_impl(qoi_encode_wrapper, raw_image);
+            result.libs_info[lib::Lib::qoi].encode_time  = qoi_time;
+            result.libs_info[lib::Lib::qoi].encoded_size = qoi_size;
+        }
+        if (opt.qoixx) {
+            auto [qoixx_time, qoixx_size] = benchmark_impl(qoixx_encode, raw_image);
+            result.libs_info[lib::Lib::qoixx].encode_time  = qoixx_time;
+            result.libs_info[lib::Lib::qoixx].encoded_size = qoixx_size;
+        }
+        if (opt.qoipp) {
+            auto [qoipp_time, qoipp_size] = benchmark_impl(qoipp_encode, raw_image);
+            result.libs_info[lib::Lib::qoipp].encode_time  = qoipp_time;
+            result.libs_info[lib::Lib::qoipp].encoded_size = qoipp_size;
+        }
         if (opt.stb) {
             auto [stb_time, stb_size] = benchmark_impl(stb_encode, raw_image);
-
             result.libs_info[lib::Lib::stb].encode_time  = stb_time;
             result.libs_info[lib::Lib::stb].encoded_size = stb_size;
         }
         if (opt.fpng) {
             auto [fpng_time, fpng_size] = benchmark_impl(fpng_encode, raw_image);
-
             result.libs_info[lib::Lib::fpng].encode_time  = fpng_time;
             result.libs_info[lib::Lib::fpng].encoded_size = fpng_size;
         }
+        // clang-format on
     }
 
     if (opt.decode) {
-        auto [qoi_time, _]     = benchmark_impl(qoi_decode_wrapper, qoi_image);
-        auto [qoixx_time, __]  = benchmark_impl(qoixx_decode, qoi_image);
-        auto [qoipp_time, ___] = benchmark_impl(qoipp_decode, qoi_image);
-
-        result.libs_info[lib::Lib::qoi].decode_time   = qoi_time;
-        result.libs_info[lib::Lib::qoixx].decode_time = qoixx_time;
-        result.libs_info[lib::Lib::qoipp].decode_time = qoipp_time;
-
+        // clang-format off
+        if (opt.qoi) {
+            auto [qoi_time, _] = benchmark_impl(qoi_decode_wrapper, qoi_image);
+            result.libs_info[lib::Lib::qoi].decode_time = qoi_time;
+        }
+        if (opt.qoixx) {
+            auto [qoixx_time, _] = benchmark_impl(qoixx_decode, qoi_image);
+            result.libs_info[lib::Lib::qoixx].decode_time = qoixx_time;
+        }
+        if (opt.qoipp) {
+            auto [qoipp_time, _] = benchmark_impl(qoipp_decode, qoi_image);
+            result.libs_info[lib::Lib::qoipp].decode_time = qoipp_time;
+        }
         if (opt.stb) {
+            auto png_image_stb = stb_encode(raw_image).image;
             auto [stb_time, _] = benchmark_impl(stb_decode, png_image_stb);
-
             result.libs_info[lib::Lib::stb].decode_time = stb_time;
         }
-
         if (opt.fpng) {
+            auto png_image_fpng = fpng_encode(raw_image).image ;
             auto [fpng_time, _] = benchmark_impl(fpng_decode, png_image_fpng);
-
             result.libs_info[lib::Lib::fpng].decode_time = fpng_time;
         }
+        // clang-format on
     }
 
     return result;
@@ -750,7 +760,8 @@ std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Opt
 
     auto benchmark_file = [&](const fs::path& file) {
         try {
-            auto result = benchmark(file, opt);
+            auto raw_image = load_image(file);
+            auto result    = benchmark(raw_image, file, opt);
             result.print(opt.color);
             results.push_back(result);
         } catch (const std::exception& e) {
@@ -847,7 +858,8 @@ try {
         summary.print(opt.color);
     } else if (fs::is_regular_file(dirpath) and dirpath.extension() == ".png") {
         try {
-            auto result = benchmark(dirpath, opt);
+            auto raw_image = load_image(dirpath);
+            auto result    = benchmark(raw_image, dirpath, opt);
             result.print(opt.color);
         } catch (const std::exception& e) {
             fmt::println("\t>> Benchmarking failed for '{}' (exception): {}", dirpath, e.what());
