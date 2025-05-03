@@ -14,8 +14,6 @@ find_package(stb REQUIRED)
 find_package(range-v3 REQUIRED)
 find_package(PerlinNoise REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
-find_package(glfw3 CONFIG REQUIRED)
-find_package(glad CONFIG REQUIRED)
 
 include(cmake/fetched-lib.cmake) # emits: qoi, qoixx
 
