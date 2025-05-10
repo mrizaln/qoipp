@@ -587,6 +587,9 @@ namespace qoipp
 
         auto data = Arr<constants::header_size>{};
         file.read(reinterpret_cast<char*>(data.data()), constants::header_size);
+        if (!file) {
+            return std::nullopt;
+        }
 
         return read_header(data);
     }
@@ -615,9 +618,8 @@ namespace qoipp
             throw std::invalid_argument{ "Could not open file for writing" };
         }
 
-        file.write(
-            reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size())
-        );
+        const auto size = static_cast<std::streamsize>(encoded.size());
+        file.write(reinterpret_cast<const char*>(encoded.data()), size);
     }
 
     Image decode_from_file(
@@ -637,9 +639,11 @@ namespace qoipp
             throw std::invalid_argument{ "Could not open file for reading" };
         }
 
-        auto data = Vec(fs::file_size(path));
-        file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        auto sstream = std::stringstream{};
+        sstream << file.rdbuf();
+        auto view = sstream.view();
 
-        return decode(data, target, flip_vertically);
+        auto span = Span{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        return decode(span, target, flip_vertically);
     }
 }
