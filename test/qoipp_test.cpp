@@ -8,8 +8,10 @@
 #include <stb_image.h>
 
 #include <boost/ut.hpp>
+#include <dtl_modern/dtl_modern.hpp>
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <fmt/std.h>
 #include <range/v3/view.hpp>
 
@@ -164,42 +166,54 @@ Image qoi_decode(const Span image)
     return result;
 }
 
-// too bad ut doesn't have something like this that can show diff between two spans
 std::string compare(Span lhs, Span rhs)
 {
-    std::string result = fmt::format(
-        "SHOULD BE EQUALS FOR ALL ELEMENTS:\nlhs size: {} | rhs size: {}\n", lhs.size(), rhs.size()
-    );
+    constexpr auto chunk = 32;
 
-    int diff_count = 0;
-    for (const auto& [i, pair] : rv::zip(lhs, rhs) | rv::enumerate) {
-        auto [left, right] = pair;
-        auto diff          = (i32)left - (i32)right;
-        if (diff != 0) {
-            ++diff_count;
-            const auto color = fmt::color::orange_red;
-            result += fmt::format(fg(color), "{}: {:#04x} - {:#04x} = {:#04x}\n", i, left, right, diff);
+    auto to_span = [](auto&& r) { return Span{ r.begin(), r.end() }; };
+
+    auto lhs_chunked = lhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
+    auto rhs_chunked = rhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
+
+    auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs_chunked, rhs_chunked, [](Span l, Span r) {
+        auto lz = l.size();
+        auto rz = r.size();
+        return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
+    });
+
+    auto buffer = std::string{};
+    auto out    = std::back_inserter(buffer);
+
+    const auto red   = fg(fmt::color::orange_red);
+    const auto green = fg(fmt::color::green_yellow);
+
+    auto prev_common = false;
+
+    for (auto [elem, info] : ses.get()) {
+        using E = dtl_modern::SesEdit;
+        switch (info.m_type) {
+        case E::Common: {
+            if (not prev_common) {
+                prev_common = true;
+                fmt::format_to(out, "...\n");
+            }
+        } break;
+        case E::Delete: {
+            auto offset = elem.begin() - lhs.begin();
+            prev_common = false;
+            auto joined = fmt::join(elem, " ");
+            fmt::format_to(out, red, "{:>5}-{:>5}: {:02x}\n", offset, offset + chunk, joined);
+        } break;
+        case E::Add: {
+            auto offset = elem.begin() - rhs.begin();
+            prev_common = false;
+            auto joined = fmt::join(elem, " ");
+            fmt::format_to(out, green, "{:>5}-{:>5}: {:02x}\n", offset, offset + chunk, joined);
+        } break;
         }
     }
 
-    if (lhs.size() != rhs.size()) {
-        auto min    = std::min(lhs.size(), rhs.size());
-        auto remain = std::abs((i32)lhs.size() - (i32)rhs.size());
-        result += fmt::format("{} elements remain [{}]\n", remain, lhs.size() > rhs.size() ? "lhs" : "rhs");
-        auto remaining = (lhs.size() > rhs.size() ? lhs : rhs) | rv::drop(min);
-        for (const auto& [i, byte] : rv::enumerate(remaining)) {
-            result += fmt::format(fg(fmt::color::orange_red), "{}: {:#04x}\n", i + min, byte);
-        }
-    }
-
-    auto size_diff = (i32)lhs.size() - (i32)rhs.size();
-    auto min       = std::min(lhs.size(), rhs.size());
-
-    result += "Summary\n";
-    result += fmt::format("\t- {} bytes difference in size\n", size_diff);
-    result += fmt::format("\t- {} difference found ({}%)", diff_count, (f32)diff_count * 100.0F / (f32)min);
-
-    return result;
+    return buffer;
 }
 
 // ----------------------

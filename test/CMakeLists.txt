@@ -24,7 +24,7 @@ enable_testing()
 add_executable(qoipp_test qoipp_test.cpp)
 target_link_libraries(
     qoipp_test
-    PRIVATE fmt::fmt Boost::ut range-v3::range-v3 stb::stb qoipp qoi
+    PRIVATE fmt::fmt Boost::ut range-v3::range-v3 stb::stb qoipp qoi dtl-modern
 )
 target_compile_options(qoipp_test PRIVATE -Wall -Wextra -Wconversion)
 target_compile_options(qoipp_test PRIVATE -fsanitize=address,leak,undefined)
