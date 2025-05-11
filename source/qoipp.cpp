@@ -549,6 +549,28 @@ namespace qoipp
         };
     }
 
+    Result<Desc> read_header(const fs::path& path) noexcept
+    {
+        if (!fs::exists(path)) {
+            return util::make_error<Desc>(Error::FileNotExists);
+        } else if (!fs::is_regular_file(path)) {
+            return util::make_error<Desc>(Error::NotRegularFile);
+        }
+
+        auto file = std::ifstream{ path, std::ios::binary };
+        if (!file.is_open()) {
+            return util::make_error<Desc>(Error::IoError);
+        }
+
+        auto data = Arr<constants::header_size>{};
+        file.read(reinterpret_cast<char*>(data.data()), constants::header_size);
+        if (!file) {
+            return util::make_error<Desc>(Error::IoError);
+        }
+
+        return read_header(data);
+    }
+
     Result<Vec> encode(std::span<const u8> data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
@@ -566,7 +588,7 @@ namespace qoipp
         return impl::encode(reader, width, height, channels, colorspace);
     }
 
-    Result<Vec> encode_from_function(PixelGenFun func, Desc desc) noexcept
+    Result<Vec> encode(PixelGenFun func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not util::desc_is_valid(desc)) {
@@ -599,28 +621,6 @@ namespace qoipp
             .data = impl::decode(data, src, dest, width, height, flip_vertically),
             .desc = std::move(header).value(),
         };
-    }
-
-    Result<Desc> read_header_from_file(const fs::path& path) noexcept
-    {
-        if (!fs::exists(path)) {
-            return util::make_error<Desc>(Error::FileNotExists);
-        } else if (!fs::is_regular_file(path)) {
-            return util::make_error<Desc>(Error::NotRegularFile);
-        }
-
-        auto file = std::ifstream{ path, std::ios::binary };
-        if (!file.is_open()) {
-            return util::make_error<Desc>(Error::IoError);
-        }
-
-        auto data = Arr<constants::header_size>{};
-        file.read(reinterpret_cast<char*>(data.data()), constants::header_size);
-        if (!file) {
-            return util::make_error<Desc>(Error::IoError);
-        }
-
-        return read_header(data);
     }
 
     Result<void> encode_to_file(

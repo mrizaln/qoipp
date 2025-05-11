@@ -193,10 +193,26 @@ namespace qoipp
     Result<Desc> read_header(Span data) noexcept;
 
     /**
+     * @brief Read the header of a QOI image from a file.
+     * @param path The path to the file.
+     * @return The description of the image (std::nullopt if it's invalid).
+     *
+     * This function returns
+     * - `Error::Empty` if the data read from file empty,
+     * - `Error::TooShort` if the length of the data read from file less than header length,
+     * - `Error::NotQoi` if the the data read from file does not describe a QOI header, or
+     * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value.
+     * - `Error::FileNotExists` if file pointed by path not exists,
+     * - `Error::NotRegularFile` if file pointed by path is not a regular file, or
+     * - `Error::IoError` if file can't be opened or read.
+     */
+    Result<Desc> read_header(const std::filesystem::path& path) noexcept;
+
+    /**
      * @brief Encode the given data into a QOI image.
      *
      * @param data The data to encode.
-     * @param desc The description of the image
+     * @param desc The description of the image.
      * @return The encoded image or an error.
      *
      * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
@@ -243,7 +259,7 @@ namespace qoipp
      * This function returns
      * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value.
      */
-    Result<Vec> encode_from_function(PixelGenFun func, Desc desc) noexcept;
+    Result<Vec> encode(PixelGenFun func, Desc desc) noexcept;
 
     /**
      * @brief Decode the given QOI image.
@@ -296,27 +312,12 @@ namespace qoipp
     }
 
     /**
-     * @brief Read the header of a QOI image from a file.
-     * @param path The path to the file.
-     * @return The description of the image (std::nullopt if it's invalid).
+     * @brief Encode the given data into a QOI image and write it to a file.
      *
-     * This function returns
-     * - `Error::Empty` if the data read from file empty,
-     * - `Error::TooShort` if the length of the data read from file less than header length,
-     * - `Error::NotQoi` if the the data read from file does not describe a QOI header, or
-     * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value.
-     * - `Error::FileNotExists` if file pointed by path not exists,
-     * - `Error::NotRegularFile` if file pointed by path is not a regular file, or
-     * - `Error::IoError` if file can't be opened or read.
-     */
-    Result<Desc> read_header_from_file(const std::filesystem::path& path) noexcept;
-
-    /**
-     * @brief Encode the given data into a QOI image and write it to a file
-     * @param path The path to the file
-     * @param data The data to encode
-     * @param desc The description of the image
-     * @param overwrite If true, the file will be overwritten if it already exists
+     * @param path The path to the file.
+     * @param data The data to encode.
+     * @param desc The description of the image.
+     * @param overwrite If true, the file will be overwritten if it already exists.
      * @return Error if an error happen, otherwise nothing.
      *
      * This function returns
@@ -335,12 +336,12 @@ namespace qoipp
     ) noexcept;
 
     /**
-     * @brief Decode a QOI image from a file
+     * @brief Decode a QOI image from a file.
      *
-     * @param path The path to the file
-     * @param target The target channels to extract; if std::nullopt, the original channels will be used
-     * @return Image The decoded image
-     * @throw std::invalid_argument If the file is not exist or not a valid QOI image
+     * @param path The path to the file.
+     * @param target The target channels to extract; if std::nullopt, the original channels will be used.
+     * @return Image The decoded image.
+     * @throw std::invalid_argument If the file is not exist or not a valid QOI image.
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      *

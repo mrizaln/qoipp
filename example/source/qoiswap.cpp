@@ -31,7 +31,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    auto maybeHeader = qoipp::read_header_from_file(input);
+    auto maybeHeader = qoipp::read_header(input);
     if (not maybeHeader) {
         fmt::println(stderr, "File is not a qoi image");
         return 1;
@@ -64,7 +64,7 @@ int main(int argc, char** argv)
     }
 
     auto now     = std::chrono::steady_clock::now();
-    auto swapped = qoipp::encode_from_function(SwapChannels{ *image }, image->desc);
+    auto swapped = qoipp::encode(SwapChannels{ *image }, image->desc);
     if (not swapped) {
         fmt::println(stderr, "failed to encode into qoi image: {}", to_string(swapped.error()));
     }
