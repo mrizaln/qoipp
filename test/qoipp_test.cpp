@@ -272,7 +272,7 @@ ut::suite three_channel_image = [] {
 
         ut::expect(ut::nothrow([&] {
             const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            assert(res.has_value());
+            ut::expect(res.has_value());
         }));
         ut::expect(ut::nothrow([&] {
             const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
@@ -321,14 +321,14 @@ ut::suite three_channel_image = [] {
         const auto qoifile = mktemp();
         ut::expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw_image, desc, false); }));
 
-        const auto header = qoipp::read_header_from_file(qoifile);
+        const auto header = qoipp::read_header(qoifile);
         ut::expect(header.has_value()) << "Invalid header";
         ut::expect(*header == desc);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         ut::expect(fs::is_empty(qoifile));
 
-        const auto empty_header = qoipp::read_header_from_file(qoifile);
+        const auto empty_header = qoipp::read_header(qoifile);
         ut::expect(!empty_header.has_value());
 
         fs::remove(qoifile);
@@ -392,7 +392,7 @@ ut::suite four_channel_image = [] {
 
         ut::expect(ut::nothrow([&] {
             const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            assert(res.has_value());
+            ut::expect(res.has_value());
         }));
         ut::expect(ut::nothrow([&] {
             const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
@@ -441,14 +441,14 @@ ut::suite four_channel_image = [] {
         const auto qoifile = mktemp();
         ut::expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw_image, desc, false); }));
 
-        const auto header = qoipp::read_header_from_file(qoifile);
+        const auto header = qoipp::read_header(qoifile);
         ut::expect(header.has_value()) << "Invalid header";
         ut::expect(*header == desc);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         ut::expect(fs::is_empty(qoifile));
 
-        const auto empty_header = qoipp::read_header_from_file(qoifile);
+        const auto empty_header = qoipp::read_header(qoifile);
         ut::expect(!empty_header.has_value());
 
         fs::remove(qoifile);
