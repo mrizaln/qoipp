@@ -16,8 +16,9 @@
 
 namespace qoipp
 {
-    using Vec  = std::vector<std::uint8_t>;
-    using Span = std::span<const std::uint8_t>;
+    using Vec   = std::vector<std::uint8_t>;
+    using Span  = std::span<std::uint8_t>;
+    using CSpan = std::span<const std::uint8_t>;
 
     enum class Colorspace : std::uint8_t
     {
@@ -190,7 +191,7 @@ namespace qoipp
      * - `Error::NotQoi` if the the data does not describe a QOI header, or
      * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value.
      */
-    Result<Desc> read_header(Span data) noexcept;
+    Result<Desc> read_header(CSpan data) noexcept;
 
     /**
      * @brief Read the header of a QOI image from a file.
@@ -222,7 +223,7 @@ namespace qoipp
      * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value.
      * - `Error::MismatchedDesc` if the number of pixel data doesn't match the image description.
      */
-    Result<Vec> encode(Span data, Desc desc) noexcept;
+    Result<Vec> encode(CSpan data, Desc desc) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image.
@@ -241,7 +242,7 @@ namespace qoipp
      */
     inline Result<Vec> encode(const void* data, std::size_t size, Desc desc) noexcept
     {
-        auto span = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
+        auto span = CSpan{ reinterpret_cast<const std::uint8_t*>(data), size };
         return encode(span, desc);
     }
 
@@ -278,7 +279,7 @@ namespace qoipp
      * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value.
      */
     Result<Image> decode(
-        Span                    data,
+        CSpan                   data,
         std::optional<Channels> target          = std::nullopt,
         bool                    flip_vertically = false
     ) noexcept;
@@ -307,7 +308,7 @@ namespace qoipp
         bool                    flip_vertically = false
     ) noexcept
     {
-        auto span = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
+        auto span = CSpan{ reinterpret_cast<const std::uint8_t*>(data), size };
         return decode(span, target, flip_vertically);
     }
 
@@ -330,7 +331,7 @@ namespace qoipp
      */
     Result<void> encode_to_file(
         const std::filesystem::path& path,
-        Span                         data,
+        CSpan                        data,
         Desc                         desc,
         bool                         overwrite = false
     ) noexcept;

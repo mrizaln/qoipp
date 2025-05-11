@@ -510,7 +510,7 @@ namespace qoipp
         }
     }
 
-    Result<Desc> read_header(Span data) noexcept
+    Result<Desc> read_header(CSpan data) noexcept
     {
         if (data.size() == 0) {
             return util::make_error<Desc>(Error::Empty);
@@ -599,7 +599,7 @@ namespace qoipp
         return impl::encode(reader, width, height, channels, colorspace);
     }
 
-    Result<Image> decode(Span data, std::optional<Channels> target, bool flip_vertically) noexcept
+    Result<Image> decode(CSpan data, std::optional<Channels> target, bool flip_vertically) noexcept
     {
         if (data.size() == 0) {
             return util::make_error<Image>(Error::Empty);
@@ -683,7 +683,7 @@ namespace qoipp
         }
 
         auto view = sstream.view();
-        auto span = Span{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode(span, target, flip_vertically);
     }
 }
