@@ -47,19 +47,18 @@ namespace qoipp
         return result;
     }
 
-    template <typename T>
-        requires std::is_fundamental_v<T>
+    template <std::integral T>
     constexpr T to_native_endian(const T& value) noexcept
     {
         if constexpr (std::endian::native == std::endian::big) {
             return value;
         } else {
-            T result  = 0;
-            result   |= (value & 0x000000FF) << 24;
-            result   |= (value & 0x0000FF00) << 8;
-            result   |= (value & 0x00FF0000) >> 8;
-            result   |= (value & 0xFF000000) >> 24;
-            return result;
+            constexpr auto size  = sizeof(T);
+            auto           array = std::bit_cast<std::array<std::byte, size>>(value);
+            for (auto i = 0u; i < size / 2; ++i) {
+                std::swap(array[i], array[size - i - 1]);
+            }
+            return std::bit_cast<T>(array);
         }
     }
 
