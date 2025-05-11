@@ -47,19 +47,18 @@ namespace qoipp
         return result;
     }
 
-    template <typename T>
-        requires std::is_fundamental_v<T>
+    template <std::integral T>
     constexpr T to_native_endian(const T& value) noexcept
     {
         if constexpr (std::endian::native == std::endian::big) {
             return value;
         } else {
-            T result  = 0;
-            result   |= (value & 0x000000FF) << 24;
-            result   |= (value & 0x0000FF00) << 8;
-            result   |= (value & 0x00FF0000) >> 8;
-            result   |= (value & 0xFF000000) >> 24;
-            return result;
+            constexpr auto size  = sizeof(T);
+            auto           array = std::bit_cast<std::array<std::byte, size>>(value);
+            for (auto i = 0u; i < size / 2; ++i) {
+                std::swap(array[i], array[size - i - 1]);
+            }
+            return std::bit_cast<T>(array);
         }
     }
 
@@ -239,6 +238,14 @@ namespace qoipp::util
         return Result<T>{ error };
 #endif
     }
+
+    bool desc_is_valid(const Desc& desc)
+    {
+        const auto& [width, height, channels, colorspace] = desc;
+        return width > 0 && height > 0    //
+            && (channels == Channels::RGBA || channels == Channels::RGB)
+            && (colorspace == Colorspace::Linear || colorspace == Colorspace::sRGB);
+    }
 };
 
 namespace qoipp::impl
@@ -299,7 +306,7 @@ namespace qoipp::impl
     }
 
     template <PixelReader Reader>
-    Vec encode(Reader reader, u32 width, u32 height, Channels channels, Colorspace colorspace)
+    Vec encode(Reader reader, u32 width, u32 height, Channels channels, Colorspace colorspace) noexcept
     {
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
         const usize max_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
@@ -505,7 +512,9 @@ namespace qoipp
 
     Result<Desc> read_header(Span data) noexcept
     {
-        if (data.size() < constants::header_size) {
+        if (data.size() == 0) {
+            return util::make_error<Desc>(Error::Empty);
+        } else if (data.size() < constants::header_size) {
             return util::make_error<Desc>(Error::TooShort);
         }
 
@@ -519,21 +528,24 @@ namespace qoipp
         auto index = constants::magic.size();
 
         u32 width, height;
-        u32 channels, colorspace;
 
         std::memcpy(&width, data.data() + index, sizeof(u32));
         index += sizeof(u32);
         std::memcpy(&height, data.data() + index, sizeof(u32));
         index += sizeof(u32);
 
-        channels   = data[index++];
-        colorspace = data[index++];
+        auto channels   = to_channels(data[index++]);
+        auto colorspace = to_colorspace(data[index++]);
+
+        if (!channels || !colorspace || width == 0 || height == 0) {
+            return util::make_error<Desc>(Error::InvalidDesc);
+        }
 
         return Desc{
             .width      = to_native_endian(width),
             .height     = to_native_endian(height),
-            .channels   = static_cast<Channels>(channels),
-            .colorspace = static_cast<Colorspace>(colorspace),
+            .channels   = *channels,
+            .colorspace = *colorspace,
         };
     }
 
@@ -542,7 +554,9 @@ namespace qoipp
         const auto [width, height, channels, colorspace] = desc;
         const auto max_size = static_cast<usize>(width * height * static_cast<u32>(channels));
 
-        if (width <= 0 || height <= 0) {
+        if (data.size() == 0) {
+            return util::make_error<Vec>(Error::Empty);
+        } else if (not util::desc_is_valid(desc)) {
             return util::make_error<Vec>(Error::InvalidDesc);
         } else if (data.size() != max_size) {
             return util::make_error<Vec>(Error::MismatchedDesc);
@@ -555,8 +569,7 @@ namespace qoipp
     Result<Vec> encode_from_function(PixelGenFun func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
-
-        if (width <= 0 || height <= 0) {
+        if (not util::desc_is_valid(desc)) {
             return util::make_error<Vec>(Error::InvalidDesc);
         }
 
@@ -592,8 +605,6 @@ namespace qoipp
     {
         if (!fs::exists(path)) {
             return util::make_error<Desc>(Error::FileNotExists);
-        } else if (fs::file_size(path) < constants::header_size) {
-            return util::make_error<Desc>(Error::TooShort);
         } else if (!fs::is_regular_file(path)) {
             return util::make_error<Desc>(Error::NotRegularFile);
         }
