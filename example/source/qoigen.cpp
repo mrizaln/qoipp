@@ -171,6 +171,11 @@ int main(int argc, char* argv[])
         return qoipp::encode(bytes, desc);
     };
 
+    if (not encoded) {
+        fmt::println(stderr, "failed to encode qoi image: {}", to_string(encoded.error()));
+        return 1;
+    }
+
     auto out = std::ofstream{ outpath, std::ios::binary };
-    out.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
+    out.write(reinterpret_cast<const char*>(encoded->data()), static_cast<std::streamsize>(encoded->size()));
 }
