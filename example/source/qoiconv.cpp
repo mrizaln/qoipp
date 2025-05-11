@@ -141,7 +141,7 @@ ImageVar read_qoi(const fs::path& filepath, bool rgb_only)
     auto bytes   = load_file(filepath);
     auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
     {
-        return qoipp::decode(bytes, rgb_only ? std::optional{ qoipp::Channels::RGB } : std::nullopt);
+        return qoipp::decode(bytes, rgb_only ? std::optional{ qoipp::Channels::RGB } : std::nullopt).value();
     };
     return { decoded };
 }
@@ -175,7 +175,7 @@ void write_qoi(const ImageVar& image, const fs::path& filepath)
 
     auto encoded = DO_TIME_MS ("Encode qoi (qoipp)")
     {
-        return qoipp::encode(data, desc);
+        return qoipp::encode(data, desc).value();
     };
     auto out = std::ofstream{ filepath, std::ios::binary | std::ios::trunc };
 
