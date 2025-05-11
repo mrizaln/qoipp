@@ -458,7 +458,7 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
 EncodeResult<> qoipp_encode(const RawImage& image)
 {
     auto timepoint = Clock::now();
-    auto encoded   = qoipp::encode(image.data, image.desc);
+    auto encoded   = qoipp::encode(image.data, image.desc).value();
     auto duration  = Clock::now() - timepoint;
 
     return {
@@ -470,7 +470,7 @@ EncodeResult<> qoipp_encode(const RawImage& image)
 DecodeResult qoipp_decode(const QoiImage& image)
 {
     auto timepoint       = Clock::now();
-    auto [decoded, desc] = qoipp::decode(image.data);
+    auto [decoded, desc] = qoipp::decode(image.data).value();
     auto duration        = Clock::now() - timepoint;
 
     return {

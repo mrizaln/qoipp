@@ -6,11 +6,11 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <format>
 #include <fstream>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
+
+namespace fs = std::filesystem;
 
 // utils ana aliases
 namespace qoipp
@@ -217,6 +217,29 @@ namespace qoipp::op
         usize m_index = 0;
     };
 }
+
+namespace qoipp::util
+{
+    template <typename T, typename... Args>
+    Result<T> make_result(Args&&... args)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::in_place, std::forward<Args>(args)... };
+#else
+        return Result<T>{ std::forward<Args>(args)... };
+#endif
+    }
+
+    template <typename T>
+    Result<T> make_error(Error error)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::unexpect, error };
+#else
+        return Result<T>{ error };
+#endif
+    }
+};
 
 namespace qoipp::impl
 {
@@ -431,7 +454,7 @@ namespace qoipp::impl
                 } break;
                 case op::Tag::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::bias_op_run;
-                    while (run-- > 0 and pixel_index < width * height) {
+                    while (run-- > 0 && pixel_index < width * height) {
                         write(pixel_index++, prev_pixel);
                     }
                     --pixel_index;
@@ -464,17 +487,33 @@ namespace qoipp::impl
 
 namespace qoipp
 {
-    std::optional<Desc> read_header(Span data) noexcept
+    std::string_view to_string(Error err) noexcept
+    {
+        switch (err) {
+        case Error::Empty: return "Data is empty";
+        case Error::FileExists: return "File already exists";
+        case Error::FileNotExists: return "File does not exist";
+        case Error::InvalidDesc: return "Image description is invalid";
+        case Error::IoError: return "Unable to do read or write operation";
+        case Error::MismatchedDesc: return "Image description does not match the data";
+        case Error::NotQoi: return "Not a qoi file";
+        case Error::NotRegularFile: return "Not a regular file";
+        case Error::TooShort: return "Data is too short";
+        default: return "Unknown";
+        }
+    }
+
+    Result<Desc> read_header(Span data) noexcept
     {
         if (data.size() < constants::header_size) {
-            return std::nullopt;
+            return util::make_error<Desc>(Error::TooShort);
         }
 
         using Magic = decltype(constants::magic);
         auto* magic = reinterpret_cast<const Magic*>(data.data());
 
         if (std::memcmp(magic, constants::magic.data(), constants::magic.size()) != 0) {
-            return std::nullopt;
+            return util::make_error<Desc>(Error::NotQoi);
         }
 
         auto index = constants::magic.size();
@@ -498,65 +537,42 @@ namespace qoipp
         };
     }
 
-    Vec encode(std::span<const u8> data, Desc desc) noexcept(false)
+    Result<Vec> encode(std::span<const u8> data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
         const auto max_size = static_cast<usize>(width * height * static_cast<u32>(channels));
 
         if (width <= 0 || height <= 0) {
-            throw std::invalid_argument{ std::format(
-                "Invalid image description: w = {}, h = {}, c = {}", width, height, static_cast<i32>(channels)
-            ) };
-        }
-
-        if (data.size() != max_size) {
-            throw std::invalid_argument{ std::format(
-                "Data size does not match the image description: expected {} x {} x {} = {}, got {}",
-                width,
-                height,
-                static_cast<i32>(channels),
-                max_size,
-                data.size()
-            ) };
-        }
-
-        if (channels == Channels::RGB && data.size() % 3 != 0) {
-            throw std::invalid_argument{
-                "Data does not align with the number of channels: expected multiple of 3 bytes"
-            };
-        } else if (channels == Channels::RGBA && data.size() % 4 != 0) {
-            throw std::invalid_argument{
-                "Data does not align with the number of channels: expected multiple of 4 bytes"
-            };
+            return util::make_error<Vec>(Error::InvalidDesc);
+        } else if (data.size() != max_size) {
+            return util::make_error<Vec>(Error::MismatchedDesc);
         }
 
         const auto reader = impl::SimplePixelReader{ data, channels };
         return impl::encode(reader, width, height, channels, colorspace);
     }
 
-    Vec encode_from_function(PixelGenFun func, Desc desc) noexcept(false)
+    Result<Vec> encode_from_function(PixelGenFun func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
 
         if (width <= 0 || height <= 0) {
-            throw std::invalid_argument{ std::format(
-                "Invalid image description: w = {}, h = {}, c = {}", width, height, static_cast<i32>(channels)
-            ) };
+            return util::make_error<Vec>(Error::InvalidDesc);
         }
 
         const auto reader = impl::FuncPixelReader{ std::move(func), channels };
         return impl::encode(reader, width, height, channels, colorspace);
     }
 
-    Image decode(Span data, std::optional<Channels> target, bool flip_vertically) noexcept(false)
+    Result<Image> decode(Span data, std::optional<Channels> target, bool flip_vertically) noexcept
     {
         if (data.size() == 0) {
-            throw std::invalid_argument{ "Data is empty" };
+            return util::make_error<Image>(Error::Empty);
         }
 
         auto header = read_header(data);
-        if (not header.has_value()) {
-            throw std::invalid_argument{ "Invalid header" };
+        if (!header.has_value()) {
+            return util::make_error<Image>(header.error());
         }
 
         auto& [width, height, channels, colorspace] = header.value();
@@ -566,83 +582,96 @@ namespace qoipp
 
         channels = dest;
 
-        return {
+        return Image{
             .data = impl::decode(data, src, dest, width, height, flip_vertically),
-            .desc = header.value(),
+            .desc = std::move(header).value(),
         };
     }
 
-    std::optional<Desc> read_header_from_file(const std::filesystem::path& path) noexcept
+    Result<Desc> read_header_from_file(const fs::path& path) noexcept
     {
-        namespace fs = std::filesystem;
-
-        if (!fs::exists(path) || fs::file_size(path) < constants::header_size || !fs::is_regular_file(path)) {
-            return std::nullopt;
+        if (!fs::exists(path)) {
+            return util::make_error<Desc>(Error::FileNotExists);
+        } else if (fs::file_size(path) < constants::header_size) {
+            return util::make_error<Desc>(Error::TooShort);
+        } else if (!fs::is_regular_file(path)) {
+            return util::make_error<Desc>(Error::NotRegularFile);
         }
 
         auto file = std::ifstream{ path, std::ios::binary };
         if (!file.is_open()) {
-            return std::nullopt;
+            return util::make_error<Desc>(Error::IoError);
         }
 
         auto data = Arr<constants::header_size>{};
         file.read(reinterpret_cast<char*>(data.data()), constants::header_size);
         if (!file) {
-            return std::nullopt;
+            return util::make_error<Desc>(Error::IoError);
         }
 
         return read_header(data);
     }
 
-    void encode_to_file(
-        const std::filesystem::path& path,
-        std::span<const u8>          data,
-        Desc                         desc,
-        bool                         overwrite
-    ) noexcept(false)
+    Result<void> encode_to_file(
+        const fs::path&     path,
+        std::span<const u8> data,
+        Desc                desc,
+        bool                overwrite
+    ) noexcept
     {
-        namespace fs = std::filesystem;
+        namespace fs = fs;
 
         if (fs::exists(path) && !overwrite) {
-            throw std::invalid_argument{ "File already exists and overwrite is false" };
-        }
-
-        if (fs::exists(path) && !fs::is_regular_file(path)) {
-            throw std::invalid_argument{ "Path is not a regular file, cannot overwrite" };
+            return util::make_error<void>(Error::FileExists);
+        } else if (fs::exists(path) && !fs::is_regular_file(path)) {
+            return util::make_error<void>(Error::NotRegularFile);
         }
 
         auto encoded = encode(data, desc);
+        if (!encoded) {
+            return util::make_error<void>(encoded.error());
+        }
 
         auto file = std::ofstream{ path, std::ios::binary | std::ios::trunc };
         if (!file.is_open()) {
-            throw std::invalid_argument{ "Could not open file for writing" };
+            return util::make_error<void>(Error::IoError);
         }
 
-        const auto size = static_cast<std::streamsize>(encoded.size());
-        file.write(reinterpret_cast<const char*>(encoded.data()), size);
+        const auto size = static_cast<std::streamsize>(encoded->size());
+        file.write(reinterpret_cast<const char*>(encoded->data()), size);
+        if (!file) {
+            return util::make_error<void>(Error::IoError);
+        }
+
+        return {};
     }
 
-    Image decode_from_file(
-        const std::filesystem::path& path,
-        std::optional<Channels>      target,
-        bool                         flip_vertically
-    ) noexcept(false)
+    Result<Image> decode_from_file(
+        const fs::path&         path,
+        std::optional<Channels> target,
+        bool                    flip_vertically
+    ) noexcept
     {
-        namespace fs = std::filesystem;
+        namespace fs = fs;
 
-        if (!fs::exists(path) || !fs::is_regular_file(path)) {
-            throw std::invalid_argument{ "Path does not exist or is not a regular file" };
+        if (!fs::exists(path)) {
+            return util::make_error<Image>(Error::FileNotExists);
+        } else if (!fs::is_regular_file(path)) {
+            return util::make_error<Image>(Error::NotRegularFile);
         }
 
         auto file = std::ifstream{ path, std::ios::binary };
         if (!file.is_open()) {
-            throw std::invalid_argument{ "Could not open file for reading" };
+            return util::make_error<Image>(Error::IoError);
         }
 
         auto sstream = std::stringstream{};
         sstream << file.rdbuf();
-        auto view = sstream.view();
+        if (!file) {
+            return util::make_error<Image>(Error::IoError);
+        }
 
+        auto view = sstream.view();
         auto span = Span{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode(span, target, flip_vertically);
     }

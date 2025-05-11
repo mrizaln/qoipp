@@ -6,7 +6,13 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <variant>
 #include <vector>
+#include <version>
+
+#if defined(__cpp_lib_expected)
+#    include <expected>
+#endif
 
 namespace qoipp
 {
@@ -23,6 +29,19 @@ namespace qoipp
     {
         RGB  = 3,
         RGBA = 4,
+    };
+
+    enum class Error
+    {
+        Empty = 1,
+        FileExists,
+        FileNotExists,
+        InvalidDesc,
+        IoError,
+        MismatchedDesc,
+        NotQoi,
+        NotRegularFile,
+        TooShort,
     };
 
     struct Pixel
@@ -51,7 +70,81 @@ namespace qoipp
         Desc desc;
     };
 
+#if defined(__cpp_lib_expected)
+    template <typename T>
+    using Result = std::expected<T, Error>;
+#else
+    template <typename T>
+    class Result
+    {
+    public:
+        Result() = default;
+
+        template <typename TT>
+        Result(TT&& tt)
+            : m_variant{ std::forward<TT>(tt) }
+        {
+        }
+
+        T&&      value() && { return std::get<T>(std::move(m_variant)); }
+        T&       value() & { return std::get<T>(m_variant); }
+        const T& value() const& { return std::get<T>(m_variant); }
+
+        Error&&      error() && { return std::get<Error>(std::move(m_variant)); }
+        Error&       error() & { return std::get<Error>(m_variant); }
+        const Error& error() const& { return std::get<Error>(m_variant); }
+
+        bool has_value() const noexcept { return std::holds_alternative<T>(m_variant); }
+
+        explicit operator bool() const noexcept { return has_value(); }
+
+        T&&      operator*() && noexcept { return std::move(value()); }
+        T&       operator*() & noexcept { return value(); }
+        const T& operator*() const& noexcept { return value(); }
+
+        T*       operator->() noexcept { return &value(); }
+        const T* operator->() const noexcept { return &value(); }
+
+    private:
+        std::variant<T, Error> m_variant;
+    };
+
+    template <>
+    class Result<void>
+    {
+    public:
+        Result() = default;
+
+        Result(Error error)
+            : m_variant{ error }
+        {
+        }
+
+        Error&&      error() && { return std::get<Error>(std::move(m_variant)); }
+        Error&       error() & { return std::get<Error>(m_variant); }
+        const Error& error() const& { return std::get<Error>(m_variant); }
+
+        bool has_value() const noexcept { return std::holds_alternative<Void>(m_variant); }
+
+        explicit operator bool() const noexcept { return has_value(); }
+
+    private:
+        struct Void
+        {
+        };
+
+        std::variant<Void, Error> m_variant;
+    };
+#endif
+
     using PixelGenFun = std::function<Pixel(std::size_t pixel_index)>;
+
+    /**
+     * @brief Get a human readable string for an error value
+     *
+     * @param error Error value
+     */
+    std::string_view to_string(Error error) noexcept;
 
     /**
      * @brief Helper function to convert a number of channels to the Channels enum
@@ -89,21 +182,20 @@ namespace qoipp
      * @brief Read the header of a QOI image
      *
      * @param data The data to read the header from
-     * @return std::optional<Desc> The description of the image if it is a valid QOI image
+     * @return Result<Desc> The description of the image if it is a valid QOI image
      */
-    std::optional<Desc> read_header(Span data) noexcept;
+    Result<Desc> read_header(Span data) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image
      *
      * @param data The data to encode
      * @param desc The description of the image
-     * @return Vec The encoded image
-     * @throw std::invalid_argument If there is a mismatch between the data and the description
+     * @return Result<Vec> The encoded image or an error
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    Vec encode(Span data, Desc desc) noexcept(false);
+    Result<Vec> encode(Span data, Desc desc) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image
@@ -111,11 +203,11 @@ namespace qoipp
      * @param data The data to encode
      * @param size The size of the data
      * @param desc The description of the image
-     * @return Vec The encoded image
+     * @return Result<Vec> The encoded image or an error
      *
      * This function assume that the raw data is in the format of RGB888 or RGBA8888.
      */
-    inline Vec encode(const void* data, std::size_t size, Desc desc) noexcept(false)
+    inline Result<Vec> encode(const void* data, std::size_t size, Desc desc) noexcept
     {
         auto byte_data = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
         return encode(byte_data, desc);
@@ -126,13 +218,13 @@ namespace qoipp
      *
      * @param func The function to generate the data
      * @param desc The description of the image
-     * @return Vec The encoded image
+     * @return Result<Vec> The encoded image or an error
      *
      * The function should return the pixel at the given pixel index. The index 0 starts at top-left corner of
      * an image and increasing to the right and then down. The alpha channel value is discarded if the
      * Desc specifies RGB channels only.
      */
-    Vec encode_from_function(PixelGenFun func, Desc desc) noexcept(false);
+    Result<Vec> encode_from_function(PixelGenFun func, Desc desc) noexcept;
 
     /**
      * @brief Decode the given QOI image
@@ -140,16 +232,15 @@ namespace qoipp
      * @param data The QOI image to decode
      * @param target The target channels to extract; if std::nullopt, the original channels will be used
      * @param flip_vertically If true, the image will be flip vertically
-     * @return Image The decoded image
-     * @throw std::invalid_argument If the data is not a valid QOI image
+     * @return Result<Image> The decoded image
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
-    Image decode(
+    Result<Image> decode(
         Span                    data,
         std::optional<Channels> target          = std::nullopt,
         bool                    flip_vertically = false
-    ) noexcept(false);
+    ) noexcept;
 
     /**
      * @brief Decode the given data into a QOI image
@@ -158,17 +249,16 @@ namespace qoipp
      * @param size The size of the data
      * @param target The target channels to extract; if std::nullopt, the original channels will be used
      * @param flip_vertically If true, the image will be flip vertically
-     * @return Image The decoded image
-     * @throw std::invalid_argument If the data is not a valid QOI image
+     * @return Result<Image> The decoded image
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
-    inline Image decode(
+    inline Result<Image> decode(
         const void*             data,
         std::size_t             size,
         std::optional<Channels> target          = std::nullopt,
         bool                    flip_vertically = false
-    ) noexcept(false)
+    ) noexcept
     {
         auto byte_data = Span{ reinterpret_cast<const std::uint8_t*>(data), size };
         return decode(byte_data, target, flip_vertically);
@@ -177,9 +267,9 @@ namespace qoipp
     /**
      * @brief Read the header of a QOI image from a file
      * @param path The path to the file
-     * @return std::optional<Desc> The description of the image (std::nullopt if it's invalid)
+     * @return Result<Desc> The description of the image (std::nullopt if it's invalid)
      */
-    std::optional<Desc> read_header_from_file(const std::filesystem::path& path) noexcept;
+    Result<Desc> read_header_from_file(const std::filesystem::path& path) noexcept;
 
     /**
      * @brief Encode the given data into a QOI image and write it to a file
@@ -187,15 +277,14 @@ namespace qoipp
      * @param data The data to encode
      * @param desc The description of the image
      * @param overwrite If true, the file will be overwritten if it already exists
-     * @throw std::invalid_argument If the file already exists and overwrite is false or if there is a
-     * mismatch between the data and the description
+     * @return Result<void> If an error happen it will set to error value
      */
-    void encode_to_file(
+    Result<void> encode_to_file(
         const std::filesystem::path& path,
         Span                         data,
         Desc                         desc,
         bool                         overwrite = false
-    ) noexcept(false);
+    ) noexcept;
 
     /**
      * @brief Decode a QOI image from a file
@@ -207,11 +296,11 @@ namespace qoipp
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
      */
-    Image decode_from_file(
+    Result<Image> decode_from_file(
         const std::filesystem::path& path,
         std::optional<Channels>      target          = std::nullopt,
         bool                         flip_vertically = false
-    ) noexcept(false);
+    ) noexcept;
 }
 
 #endif /* end of include guard: QOIPP_HPP_O4A387W5ER6OW7E */

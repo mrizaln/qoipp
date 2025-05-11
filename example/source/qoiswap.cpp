@@ -4,6 +4,7 @@
 #include <CLI/CLI.hpp>
 #include <filesystem>
 #include <fmt/core.h>
+#include <fmt/std.h>
 
 #include <chrono>
 #include <fstream>
@@ -56,13 +57,22 @@ int main(int argc, char** argv)
         }
     };
 
-    auto image    = qoipp::decode_from_file(input);
-    auto now      = std::chrono::steady_clock::now();
-    auto swapped  = qoipp::encode_from_function(SwapChannels{ image }, image.desc);
+    auto image = qoipp::decode_from_file(input);
+    if (not image) {
+        fmt::println(stderr, "failed to decode qoi file {}: {}", input, to_string(image.error()));
+        return 1;
+    }
+
+    auto now     = std::chrono::steady_clock::now();
+    auto swapped = qoipp::encode_from_function(SwapChannels{ *image }, image->desc);
+    if (not swapped) {
+        fmt::println(stderr, "failed to encode into qoi image: {}", to_string(swapped.error()));
+    }
+
     auto duration = std::chrono::steady_clock::now() - now;
 
     auto out = std::fstream{ input, std::ios::out | std::ios::binary };
-    out.write(reinterpret_cast<char*>(swapped.data()), static_cast<std::streamsize>(swapped.size()));
+    out.write(reinterpret_cast<char*>(swapped->data()), static_cast<std::streamsize>(swapped->size()));
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
     fmt::println("Swapped channels in {}ms", ms);
