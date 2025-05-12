@@ -68,9 +68,23 @@ namespace qoipp
     std::decay_t<T> decay_copy(T&&);
 
     template <typename T>
-    concept PixelReader = requires (const T ct, T t, usize idx) {
+    concept PixelReader = requires (const T ct, usize idx) {
         { ct.read(idx) } -> std::same_as<Pixel>;
-        { decay_copy(t.channels) } -> std::same_as<Channels>;
+    };
+
+    template <typename T>
+    concept PixelWriter = requires (T t, usize idx, const Pixel& pixel) {
+        { t.write(idx, pixel) } -> std::same_as<void>;
+    };
+
+    template <typename T>
+    concept ByteReader = requires (const T ct, usize idx) {
+        { ct.read(idx) } -> std::same_as<u8>;
+    };
+
+    template <typename T>
+    concept ByteWriter = requires (T t, usize idx, u8 byte) {
+        { t.write(idx, byte) } -> std::same_as<void>;
     };
 }
 
@@ -99,23 +113,6 @@ namespace qoipp::constants
 
 namespace qoipp::op
 {
-    inline usize write_magic(Vec& vec, usize index) noexcept
-    {
-        for (char c : constants::magic) {
-            vec[index++] = static_cast<u8>(c);
-        }
-        return index;
-    }
-
-    inline usize write32(Vec& vec, usize index, u32 value) noexcept
-    {
-        vec[index + 0] = static_cast<u8>((value >> 24) & 0xFF);
-        vec[index + 1] = static_cast<u8>((value >> 16) & 0xFF);
-        vec[index + 2] = static_cast<u8>((value >> 8) & 0xFF);
-        vec[index + 3] = static_cast<u8>(value & 0xFF);
-        return index + 4;
-    }
-
     enum Tag : u8
     {
         OP_RGB   = 0b11111110,
@@ -140,79 +137,90 @@ namespace qoipp::op
             && dg >= constants::min_luma_g && dg <= constants::max_luma_g;
     }
 
+    template <ByteWriter Out>
     class ChunkArray
     {
     public:
-        ChunkArray(usize size)
-            : m_bytes(size)
+        ChunkArray(Out& out)
+            : m_out{ out }
         {
         }
 
         void write_header(u32 width, u32 height, Channels channels, Colorspace colorspace) noexcept
         {
-            m_index = op::write_magic(m_bytes, m_index);
-            m_index = op::write32(m_bytes, m_index, width);
-            m_index = op::write32(m_bytes, m_index, height);
+            for (char c : constants::magic) {
+                m_out.write(m_index++, static_cast<u8>(c));
+            }
 
-            m_bytes[m_index++] = static_cast<u8>(channels);
-            m_bytes[m_index++] = static_cast<u8>(colorspace);
+            auto width_arr = std::bit_cast<Arr<4>>(width);
+            for (auto i = 4u; i > 0; --i) {
+                m_out.write(m_index++, width_arr[i - 1]);
+            }
+
+            auto height_arr = std::bit_cast<Arr<4>>(height);
+            for (auto i = 4u; i > 0; --i) {
+                m_out.write(m_index++, height_arr[i - 1]);
+            }
+
+            m_out.write(m_index++, static_cast<u8>(channels));
+            m_out.write(m_index++, static_cast<u8>(colorspace));
         }
 
         void write_end_marker() noexcept
         {
             for (auto byte : constants::end_marker) {
-                m_bytes[m_index++] = byte;
+                m_out.write(m_index++, byte);
             }
         }
 
         void write_rgb(const Pixel& pixel) noexcept
         {
-            m_bytes[m_index++] = Tag::OP_RGB;
-            std::memcpy(m_bytes.data() + m_index, &pixel, 3);
-            m_index += 3;
+            m_out.write(m_index++, Tag::OP_RGB);
+            m_out.write(m_index++, pixel.r);
+            m_out.write(m_index++, pixel.g);
+            m_out.write(m_index++, pixel.b);
         }
 
         void write_rgba(const Pixel& pixel) noexcept
         {
-            m_bytes[m_index++] = Tag::OP_RGBA;
-            std::memcpy(m_bytes.data() + m_index, &pixel, 4);
-            m_index += 4;
+            m_out.write(m_index++, Tag::OP_RGBA);
+            m_out.write(m_index++, pixel.r);
+            m_out.write(m_index++, pixel.g);
+            m_out.write(m_index++, pixel.b);
+            m_out.write(m_index++, pixel.a);
         }
 
         void write_index(u8 index) noexcept
         {
-            m_bytes[m_index++] = Tag::OP_INDEX | index;    //
+            m_out.write(m_index++, Tag::OP_INDEX | index);    //
         }
 
         void write_diff(i8 dr, i8 dg, i8 db) noexcept
         {
-            const auto bias    = constants::bias_op_diff;
-            const auto val     = Tag::OP_DIFF | (dr + bias) << 4 | (dg + bias) << 2 | (db + bias);
-            m_bytes[m_index++] = static_cast<u8>(val);
+            constexpr auto bias = constants::bias_op_diff;
+
+            const auto val = Tag::OP_DIFF | (dr + bias) << 4 | (dg + bias) << 2 | (db + bias);
+            m_out.write(m_index++, static_cast<u8>(val));
         }
 
         void write_luma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
         {
-            const auto bias_g  = constants::bias_op_luma_g;
-            const auto bias_rb = constants::bias_op_luma_rb;
+            constexpr auto bias_g  = constants::bias_op_luma_g;
+            constexpr auto bias_rb = constants::bias_op_luma_rb;
 
-            m_bytes[m_index++] = static_cast<u8>(Tag::OP_LUMA | (dg + bias_g));
-            m_bytes[m_index++] = static_cast<u8>((dr_dg + bias_rb) << 4 | (db_dg + bias_rb));
+            m_out.write(m_index++, static_cast<u8>(Tag::OP_LUMA | (dg + bias_g)));
+            m_out.write(m_index++, static_cast<u8>((dr_dg + bias_rb) << 4 | (db_dg + bias_rb)));
         }
 
         void write_run(u8 run) noexcept
         {
-            m_bytes[m_index++] = static_cast<u8>(Tag::OP_RUN | (run + constants::bias_op_run));
+            m_out.write(m_index++, static_cast<u8>(Tag::OP_RUN | (run + constants::bias_op_run)));
         }
 
-        Vec get() noexcept
-        {
-            m_bytes.resize(m_index);
-            return std::move(m_bytes);
-        }
+        usize count() const noexcept { return m_index; }
 
     private:
-        Vec   m_bytes;
+        Out&  m_out;
         usize m_index = 0;
     };
 }
@@ -252,12 +260,20 @@ namespace qoipp::impl
 {
     using RunningArray = std::array<Pixel, constants::running_array_size>;
 
+    struct SimpleByteWriter
+    {
+        std::span<u8> dest;
+
+        void write(usize index, u8 byte) { dest[index] = byte; }
+    };
+    static_assert(ByteWriter<SimpleByteWriter>);
+
     struct SimplePixelWriter
     {
         std::span<u8> dest;
         Channels      channels;
 
-        void operator()(usize index, const Pixel& pixel) noexcept
+        void write(usize index, const Pixel& pixel) noexcept
         {
             const auto offset = index * static_cast<usize>(channels);
             if (channels == Channels::RGBA) {
@@ -267,6 +283,7 @@ namespace qoipp::impl
             }
         }
     };
+    static_assert(PixelWriter<SimplePixelWriter>);
 
     struct SimplePixelReader
     {
@@ -283,6 +300,7 @@ namespace qoipp::impl
             }
         }
     };
+    static_assert(PixelReader<SimplePixelReader>);
 
     struct FuncPixelReader
     {
@@ -298,6 +316,7 @@ namespace qoipp::impl
             return pixel;
         }
     };
+    static_assert(PixelReader<FuncPixelReader>);
 
     inline usize hash(const Pixel& pixel)
     {
@@ -305,14 +324,10 @@ namespace qoipp::impl
         return (r * 3 + g * 5 + b * 7 + a * 11);
     }
 
-    template <PixelReader Reader>
-    Vec encode(Reader reader, u32 width, u32 height, Channels channels, Colorspace colorspace) noexcept
+    template <PixelReader In, ByteWriter Out>
+    usize encode(Out out, In in, u32 width, u32 height, Channels channels, Colorspace colorspace) noexcept
     {
-        // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const usize max_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
-                             + constants::header_size + constants::end_marker.size();
-
-        auto chunks      = op::ChunkArray{ max_size };    // the encoded data goes here
+        auto chunks      = op::ChunkArray{ out };    // the encoded data goes here
         auto seen_pixels = RunningArray{};
 
         chunks.write_header(width, height, channels, colorspace);
@@ -322,7 +337,7 @@ namespace qoipp::impl
         u8   run        = 0;
 
         for (usize pixel_index = 0u; pixel_index < width * height; ++pixel_index) {
-            curr_pixel = reader.read(pixel_index);
+            curr_pixel = in.read(pixel_index);
 
             if (prev_pixel == curr_pixel) {
                 ++run;
@@ -344,7 +359,7 @@ namespace qoipp::impl
                 } else {
                     seen_pixels[index] = curr_pixel;
 
-                    if (reader.channels == Channels::RGBA && prev_pixel.a != curr_pixel.a) {
+                    if (in.channels == Channels::RGBA && prev_pixel.a != curr_pixel.a) {
                         chunks.write_rgba(curr_pixel);
                         prev_pixel = curr_pixel;
                         continue;
@@ -377,8 +392,7 @@ namespace qoipp::impl
         }
 
         chunks.write_end_marker();
-
-        return chunks.get();
+        return chunks.count();
     }
 
     Vec decode(
@@ -393,12 +407,10 @@ namespace qoipp::impl
         auto decoded     = Vec(width * height * static_cast<u8>(dest));
         auto seen_pixels = RunningArray{};
 
-        // seen_pixels.fill({ 0x00, 0x00, 0x00, 0x00 });
-
         auto prev_pixel = constants::start;
 
-        const auto get   = [&](usize index) -> u8 { return index < data.size() ? data[index] : 0x00; };
-        auto       write = SimplePixelWriter{ decoded, dest };
+        const auto get    = [&](usize index) -> u8 { return index < data.size() ? data[index] : 0x00; };
+        auto       writer = SimplePixelWriter{ decoded, dest };
 
         seen_pixels[hash(prev_pixel) % constants::running_array_size] = prev_pixel;
 
@@ -462,7 +474,7 @@ namespace qoipp::impl
                 case op::Tag::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::bias_op_run;
                     while (run-- > 0 && pixel_index < width * height) {
-                        write(pixel_index++, prev_pixel);
+                        writer.write(pixel_index++, prev_pixel);
                     }
                     --pixel_index;
                     if (pixel_index >= width * height) {
@@ -474,7 +486,7 @@ namespace qoipp::impl
                 }
             }
 
-            write(pixel_index, curr_pixel);
+            writer.write(pixel_index, curr_pixel);
             prev_pixel = seen_pixels[hash(curr_pixel) % constants::running_array_size] = curr_pixel;
         }
 
@@ -584,8 +596,18 @@ namespace qoipp
             return util::make_error<Vec>(Error::MismatchedDesc);
         }
 
-        const auto reader = impl::SimplePixelReader{ data, channels };
-        return impl::encode(reader, width, height, channels, colorspace);
+        // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
+        const auto worst_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
+                              + constants::header_size + constants::end_marker.size();
+
+        auto result = Vec(worst_size);
+        auto writer = impl::SimpleByteWriter{ .dest = result };
+        auto reader = impl::SimplePixelReader{ data, channels };
+
+        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        result.resize(count);
+
+        return result;
     }
 
     Result<Vec> encode(PixelGenFun func, Desc desc) noexcept
@@ -595,8 +617,18 @@ namespace qoipp
             return util::make_error<Vec>(Error::InvalidDesc);
         }
 
-        const auto reader = impl::FuncPixelReader{ std::move(func), channels };
-        return impl::encode(reader, width, height, channels, colorspace);
+        // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
+        const auto worst_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
+                              + constants::header_size + constants::end_marker.size();
+
+        auto result = Vec(worst_size);
+        auto writer = impl::SimpleByteWriter{ .dest = result };
+        auto reader = impl::FuncPixelReader{ std::move(func), channels };
+
+        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        result.resize(count);
+
+        return result;
     }
 
     Result<Image> decode(CSpan data, std::optional<Channels> target, bool flip_vertically) noexcept
