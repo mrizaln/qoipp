@@ -10,11 +10,11 @@
 #include <type_traits>
 #include <utility>
 
-namespace fs = std::filesystem;
-
 // utils ana aliases
 namespace qoipp
 {
+    namespace fs = std::filesystem;
+
     using i8  = std::int8_t;
     using i16 = std::int16_t;
     using i32 = std::int32_t;
@@ -36,33 +36,6 @@ namespace qoipp
 
     template <typename T, typename... Ts>
     concept AnyOf = (std::same_as<T, Ts> or ...);
-
-    template <typename T, usize N>
-    consteval Arr<N> to_bytes(const T (&value)[N])
-    {
-        auto result = Arr<N>{};
-        for (usize i = 0; i < N; ++i) {
-            result[i] = static_cast<u8>(value[i]);
-        }
-        return result;
-    }
-
-    template <std::integral T>
-    constexpr T to_native_endian(const T& value) noexcept
-    {
-        if constexpr (std::endian::native == std::endian::big) {
-            return value;
-        } else {
-            constexpr auto size  = sizeof(T);
-            auto           array = std::bit_cast<std::array<std::byte, size>>(value);
-            for (auto i = 0u; i < size / 2; ++i) {
-                std::swap(array[i], array[size - i - 1]);
-            }
-            return std::bit_cast<T>(array);
-        }
-    }
-
-    static_assert(std::is_trivial_v<Pixel>);
 
     template <class T>
     std::decay_t<T> decay_copy(T&&);
@@ -86,15 +59,58 @@ namespace qoipp
     concept ByteWriter = requires (T t, usize idx, u8 byte) {
         { t.write(idx, byte) } -> std::same_as<void>;
     };
+
+    template <std::integral T>
+    constexpr T to_native_endian(const T& value) noexcept
+    {
+        if constexpr (std::endian::native == std::endian::big) {
+            return value;
+        } else {
+            constexpr auto size  = sizeof(T);
+            auto           array = std::bit_cast<std::array<std::byte, size>>(value);
+            for (auto i = 0u; i < size / 2; ++i) {
+                std::swap(array[i], array[size - i - 1]);
+            }
+            return std::bit_cast<T>(array);
+        }
+    }
+
+    template <typename T, typename... Args>
+    Result<T> make_result(Args&&... args)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::in_place, std::forward<Args>(args)... };
+#else
+        return Result<T>{ std::forward<Args>(args)... };
+#endif
+    }
+
+    template <typename T>
+    Result<T> make_error(Error error)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::unexpect, error };
+#else
+        return Result<T>{ error };
+#endif
+    }
+
+    bool desc_is_valid(const Desc& desc)
+    {
+        const auto& [width, height, channels, colorspace] = desc;
+        return width > 0 && height > 0    //
+            && (channels == Channels::RGBA || channels == Channels::RGB)
+            && (colorspace == Colorspace::Linear || colorspace == Colorspace::sRGB);
+    }
 }
 
 namespace qoipp::constants
 {
     constexpr std::array magic = { 'q', 'o', 'i', 'f' };
 
-    constexpr usize header_size        = 14;
-    constexpr usize running_array_size = 64;
-    constexpr Arr   end_marker         = to_bytes({ 0, 0, 0, 0, 0, 0, 0, 1 });
+    constexpr usize  header_size        = 14;
+    constexpr usize  running_array_size = 64;
+    constexpr Arr<8> end_marker         = { 0, 0, 0, 0, 0, 0, 0, 1 };
 
     constexpr i8 bias_op_run     = -1;
     constexpr i8 bias_op_diff    = 2;
@@ -224,37 +240,6 @@ namespace qoipp::op
         usize m_index = 0;
     };
 }
-
-namespace qoipp::util
-{
-    template <typename T, typename... Args>
-    Result<T> make_result(Args&&... args)
-    {
-#if defined(__cpp_lib_expected)
-        return Result<T>{ std::in_place, std::forward<Args>(args)... };
-#else
-        return Result<T>{ std::forward<Args>(args)... };
-#endif
-    }
-
-    template <typename T>
-    Result<T> make_error(Error error)
-    {
-#if defined(__cpp_lib_expected)
-        return Result<T>{ std::unexpect, error };
-#else
-        return Result<T>{ error };
-#endif
-    }
-
-    bool desc_is_valid(const Desc& desc)
-    {
-        const auto& [width, height, channels, colorspace] = desc;
-        return width > 0 && height > 0    //
-            && (channels == Channels::RGBA || channels == Channels::RGB)
-            && (colorspace == Colorspace::Linear || colorspace == Colorspace::sRGB);
-    }
-};
 
 namespace qoipp::impl
 {
@@ -525,16 +510,16 @@ namespace qoipp
     Result<Desc> read_header(CSpan data) noexcept
     {
         if (data.size() == 0) {
-            return util::make_error<Desc>(Error::Empty);
+            return make_error<Desc>(Error::Empty);
         } else if (data.size() < constants::header_size) {
-            return util::make_error<Desc>(Error::TooShort);
+            return make_error<Desc>(Error::TooShort);
         }
 
         using Magic = decltype(constants::magic);
         auto* magic = reinterpret_cast<const Magic*>(data.data());
 
         if (std::memcmp(magic, constants::magic.data(), constants::magic.size()) != 0) {
-            return util::make_error<Desc>(Error::NotQoi);
+            return make_error<Desc>(Error::NotQoi);
         }
 
         auto index = constants::magic.size();
@@ -550,7 +535,7 @@ namespace qoipp
         auto colorspace = to_colorspace(data[index++]);
 
         if (!channels || !colorspace || width == 0 || height == 0) {
-            return util::make_error<Desc>(Error::InvalidDesc);
+            return make_error<Desc>(Error::InvalidDesc);
         }
 
         return Desc{
@@ -564,20 +549,20 @@ namespace qoipp
     Result<Desc> read_header(const fs::path& path) noexcept
     {
         if (!fs::exists(path)) {
-            return util::make_error<Desc>(Error::FileNotExists);
+            return make_error<Desc>(Error::FileNotExists);
         } else if (!fs::is_regular_file(path)) {
-            return util::make_error<Desc>(Error::NotRegularFile);
+            return make_error<Desc>(Error::NotRegularFile);
         }
 
         auto file = std::ifstream{ path, std::ios::binary };
         if (!file.is_open()) {
-            return util::make_error<Desc>(Error::IoError);
+            return make_error<Desc>(Error::IoError);
         }
 
         auto data = Arr<constants::header_size>{};
         file.read(reinterpret_cast<char*>(data.data()), constants::header_size);
         if (!file) {
-            return util::make_error<Desc>(Error::IoError);
+            return make_error<Desc>(Error::IoError);
         }
 
         return read_header(data);
@@ -589,11 +574,11 @@ namespace qoipp
         const auto max_size = static_cast<usize>(width * height * static_cast<u32>(channels));
 
         if (data.size() == 0) {
-            return util::make_error<Vec>(Error::Empty);
-        } else if (not util::desc_is_valid(desc)) {
-            return util::make_error<Vec>(Error::InvalidDesc);
+            return make_error<Vec>(Error::Empty);
+        } else if (not desc_is_valid(desc)) {
+            return make_error<Vec>(Error::InvalidDesc);
         } else if (data.size() != max_size) {
-            return util::make_error<Vec>(Error::MismatchedDesc);
+            return make_error<Vec>(Error::MismatchedDesc);
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
@@ -613,8 +598,8 @@ namespace qoipp
     Result<Vec> encode(PixelGenFun func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
-        if (not util::desc_is_valid(desc)) {
-            return util::make_error<Vec>(Error::InvalidDesc);
+        if (not desc_is_valid(desc)) {
+            return make_error<Vec>(Error::InvalidDesc);
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
@@ -634,12 +619,12 @@ namespace qoipp
     Result<Image> decode(CSpan data, std::optional<Channels> target, bool flip_vertically) noexcept
     {
         if (data.size() == 0) {
-            return util::make_error<Image>(Error::Empty);
+            return make_error<Image>(Error::Empty);
         }
 
         auto header = read_header(data);
         if (!header.has_value()) {
-            return util::make_error<Image>(header.error());
+            return make_error<Image>(header.error());
         }
 
         auto& [width, height, channels, colorspace] = header.value();
@@ -662,28 +647,26 @@ namespace qoipp
         bool                overwrite
     ) noexcept
     {
-        namespace fs = fs;
-
         if (fs::exists(path) && !overwrite) {
-            return util::make_error<void>(Error::FileExists);
+            return make_error<void>(Error::FileExists);
         } else if (fs::exists(path) && !fs::is_regular_file(path)) {
-            return util::make_error<void>(Error::NotRegularFile);
+            return make_error<void>(Error::NotRegularFile);
         }
 
         auto encoded = encode(data, desc);
         if (!encoded) {
-            return util::make_error<void>(encoded.error());
+            return make_error<void>(encoded.error());
         }
 
         auto file = std::ofstream{ path, std::ios::binary | std::ios::trunc };
         if (!file.is_open()) {
-            return util::make_error<void>(Error::IoError);
+            return make_error<void>(Error::IoError);
         }
 
         const auto size = static_cast<std::streamsize>(encoded->size());
         file.write(reinterpret_cast<const char*>(encoded->data()), size);
         if (!file) {
-            return util::make_error<void>(Error::IoError);
+            return make_error<void>(Error::IoError);
         }
 
         return {};
@@ -695,23 +678,21 @@ namespace qoipp
         bool                    flip_vertically
     ) noexcept
     {
-        namespace fs = fs;
-
         if (!fs::exists(path)) {
-            return util::make_error<Image>(Error::FileNotExists);
+            return make_error<Image>(Error::FileNotExists);
         } else if (!fs::is_regular_file(path)) {
-            return util::make_error<Image>(Error::NotRegularFile);
+            return make_error<Image>(Error::NotRegularFile);
         }
 
         auto file = std::ifstream{ path, std::ios::binary };
         if (!file.is_open()) {
-            return util::make_error<Image>(Error::IoError);
+            return make_error<Image>(Error::IoError);
         }
 
         auto sstream = std::stringstream{};
         sstream << file.rdbuf();
         if (!file) {
-            return util::make_error<Image>(Error::IoError);
+            return make_error<Image>(Error::IoError);
         }
 
         auto view = sstream.view();
