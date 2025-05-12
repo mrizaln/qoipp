@@ -23,9 +23,9 @@
 
 namespace fs = std::filesystem;
 
+using qoipp::CSpan;
 using qoipp::Desc;
 using qoipp::Image;
-using qoipp::Span;
 using qoipp::Vec;
 
 struct StbImage
@@ -47,9 +47,9 @@ struct ImageVar
         using Ts::operator()...;
     };
 
-    std::pair<Span, Desc> get() const
+    std::pair<CSpan, Desc> get() const
     {
-        const auto tup = std::make_pair<Span, const Desc&>;
+        const auto tup = std::make_pair<CSpan, const Desc&>;
         return std::visit(
             Overloaded{
                 [&](const Image& d) { return tup(d.data, d.desc); },

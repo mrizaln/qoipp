@@ -45,7 +45,7 @@ using isize = std::ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-using qoipp::Span;
+using qoipp::CSpan;
 using qoipp::Vec;
 
 namespace fs = std::filesystem;
@@ -78,7 +78,7 @@ Vec read_file(const fs::path& path)
     return data;
 }
 
-Vec rbg_only(Span data)
+Vec rbg_only(CSpan data)
 {
     if (data.size() % 4) {
         throw std::invalid_argument("data size must be a multiple of 4");
@@ -144,7 +144,7 @@ Image qoi_encode(const Image& image)
     return result;
 }
 
-Image qoi_decode(const Span image)
+Image qoi_decode(const CSpan image)
 {
     qoi_desc desc;
     auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
@@ -170,16 +170,16 @@ Image qoi_decode(const Span image)
     return result;
 }
 
-std::string compare(Span lhs, Span rhs)
+std::string compare(CSpan lhs, CSpan rhs)
 {
     constexpr auto chunk = 32;
 
-    auto to_span = [](auto&& r) { return Span{ r.begin(), r.end() }; };
+    auto to_span = [](auto&& r) { return CSpan{ r.begin(), r.end() }; };
 
     auto lhs_chunked = lhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
     auto rhs_chunked = rhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
 
-    auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs_chunked, rhs_chunked, [](Span l, Span r) {
+    auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs_chunked, rhs_chunked, [](CSpan l, CSpan r) {
         auto lz = l.size();
         auto rz = r.size();
         return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
