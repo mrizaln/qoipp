@@ -247,7 +247,7 @@ namespace qoipp::impl
 
     struct SimpleByteWriter
     {
-        std::span<u8> dest;
+        Span dest;
 
         void write(usize index, u8 byte) { dest[index] = byte; }
     };
@@ -255,8 +255,8 @@ namespace qoipp::impl
 
     struct SimplePixelWriter
     {
-        std::span<u8> dest;
-        Channels      channels;
+        Span     dest;
+        Channels channels;
 
         void write(usize index, const Pixel& pixel) noexcept
         {
@@ -270,10 +270,18 @@ namespace qoipp::impl
     };
     static_assert(PixelWriter<SimplePixelWriter>);
 
+    struct FuncPixelWriter
+    {
+        PixelSinkFun func;
+
+        void write([[maybe_unused]] usize index, const Pixel& pixel) noexcept { func(pixel); }
+    };
+    static_assert(PixelWriter<FuncPixelWriter>);
+
     struct SimplePixelReader
     {
-        std::span<const u8> data;
-        Channels            channels;
+        CSpan    data;
+        Channels channels;
 
         Pixel read(usize index) const noexcept
         {
@@ -380,26 +388,17 @@ namespace qoipp::impl
         return chunks.count();
     }
 
-    Vec decode(
-        std::span<const u8> data,
-        Channels            src,
-        Channels            dest,
-        usize               width,
-        usize               height,
-        bool                flip_vertically
-    ) noexcept(false)
+    template <PixelWriter Out>
+    void decode(Out out, CSpan in, Channels channels, usize width, usize height) noexcept(false)
     {
-        auto decoded     = Vec(width * height * static_cast<u8>(dest));
         auto seen_pixels = RunningArray{};
+        auto prev_pixel  = constants::start;
 
-        auto prev_pixel = constants::start;
-
-        const auto get    = [&](usize index) -> u8 { return index < data.size() ? data[index] : 0x00; };
-        auto       writer = SimplePixelWriter{ decoded, dest };
+        const auto get = [&](usize index) -> u8 { return index < in.size() ? in[index] : 0x00; };
 
         seen_pixels[hash(prev_pixel) % constants::running_array_size] = prev_pixel;
 
-        const auto chunks_size = data.size() - constants::header_size - constants::end_marker.size();
+        const auto chunks_size = in.size() - constants::header_size - constants::end_marker.size();
         for (usize pixel_index = 0, data_index = constants::header_size;
              data_index < chunks_size || pixel_index < width * height;
              ++pixel_index) {
@@ -412,7 +411,7 @@ namespace qoipp::impl
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if (src == Channels::RGBA) {
+                if (channels == Channels::RGBA) {
                     curr_pixel.a = prev_pixel.a;
                 }
             } break;
@@ -420,7 +419,7 @@ namespace qoipp::impl
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if (src == Channels::RGBA) {
+                if (channels == Channels::RGBA) {
                     curr_pixel.a = get(data_index++);
                 }
             } break;
@@ -438,7 +437,7 @@ namespace qoipp::impl
                     curr_pixel.r = static_cast<u8>(dr + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(db + prev_pixel.b);
-                    if (src == Channels::RGBA) {
+                    if (channels == Channels::RGBA) {
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
@@ -452,14 +451,14 @@ namespace qoipp::impl
                     curr_pixel.r = static_cast<u8>(dg + dr_dg + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(dg + db_dg + prev_pixel.b);
-                    if (src == Channels::RGBA) {
+                    if (channels == Channels::RGBA) {
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
                 case op::Tag::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::bias_op_run;
                     while (run-- > 0 && pixel_index < width * height) {
-                        writer.write(pixel_index++, prev_pixel);
+                        out.write(pixel_index++, prev_pixel);
                     }
                     --pixel_index;
                     if (pixel_index >= width * height) {
@@ -471,21 +470,9 @@ namespace qoipp::impl
                 }
             }
 
-            writer.write(pixel_index, curr_pixel);
+            out.write(pixel_index, curr_pixel);
             prev_pixel = seen_pixels[hash(curr_pixel) % constants::running_array_size] = curr_pixel;
         }
-
-        if (flip_vertically) {
-            const auto linesize = width * static_cast<usize>(dest);
-            for (usize y = 0; y < height / 2; ++y) {
-                auto* line1 = decoded.data() + y * linesize;
-                auto* line2 = decoded.data() + (height - y - 1) * linesize;
-
-                std::swap_ranges(line1, line1 + linesize, line2);
-            }
-        }
-
-        return decoded;
     }
 }
 
@@ -568,7 +555,7 @@ namespace qoipp
         return read_header(data);
     }
 
-    Result<Vec> encode(std::span<const u8> data, Desc desc) noexcept
+    Result<Vec> encode(CSpan data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
         const auto max_size = static_cast<usize>(width * height * static_cast<u32>(channels));
@@ -586,7 +573,7 @@ namespace qoipp
                               + constants::header_size + constants::end_marker.size();
 
         auto result = Vec(worst_size);
-        auto writer = impl::SimpleByteWriter{ .dest = result };
+        auto writer = impl::SimpleByteWriter{ result };
         auto reader = impl::SimplePixelReader{ data, channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
@@ -607,7 +594,7 @@ namespace qoipp
                               + constants::header_size + constants::end_marker.size();
 
         auto result = Vec(worst_size);
-        auto writer = impl::SimpleByteWriter{ .dest = result };
+        auto writer = impl::SimpleByteWriter{ result };
         auto reader = impl::FuncPixelReader{ std::move(func), channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
@@ -634,18 +621,27 @@ namespace qoipp
 
         channels = dest;
 
+        auto result = Vec(width * height * static_cast<usize>(dest));
+        auto writer = impl::SimplePixelWriter{ result, dest };
+
+        impl::decode(writer, data, src, width, height);
+
+        if (flip_vertically) {
+            const auto linesize = width * static_cast<usize>(dest);
+            for (usize y = 0; y < height / 2; ++y) {
+                auto* line1 = result.data() + y * linesize;
+                auto* line2 = result.data() + (height - y - 1) * linesize;
+                std::swap_ranges(line1, line1 + linesize, line2);
+            }
+        }
+
         return Image{
-            .data = impl::decode(data, src, dest, width, height, flip_vertically),
+            .data = std::move(result),
             .desc = std::move(header).value(),
         };
     }
 
-    Result<void> encode_to_file(
-        const fs::path&     path,
-        std::span<const u8> data,
-        Desc                desc,
-        bool                overwrite
-    ) noexcept
+    Result<void> encode_to_file(const fs::path& path, CSpan data, Desc desc, bool overwrite) noexcept
     {
         if (fs::exists(path) && !overwrite) {
             return make_error<void>(Error::FileExists);
