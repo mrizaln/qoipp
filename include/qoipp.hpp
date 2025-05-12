@@ -194,6 +194,25 @@ namespace qoipp
     Result<Desc> read_header(CSpan data) noexcept;
 
     /**
+     * @brief Read the header of a QOI image.
+     *
+     * @param data The data to encode.
+     * @param size The size of the data.
+     * @return The description of QOI image if it is a valid QOI header.
+     *
+     * This function returns
+     * - `Error::Empty` if the length of the data is zero,
+     * - `Error::TooShort` if the length of the data passed in less than header length,
+     * - `Error::NotQoi` if the the data does not describe a QOI header, or
+     * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value.
+     */
+    inline Result<Desc> read_header(const void* data, std::size_t size) noexcept
+    {
+        auto span = CSpan{ reinterpret_cast<const std::uint8_t*>(data), size };
+        return read_header(span);
+    }
+
+    /**
      * @brief Read the header of a QOI image from a file.
      * @param path The path to the file.
      * @return The description of the image (std::nullopt if it's invalid).
