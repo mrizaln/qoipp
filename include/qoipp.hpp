@@ -35,15 +35,16 @@ namespace qoipp
     enum class Error
     {
         Empty = 1,
-        FileExists,
-        FileNotExists,
+        TooShort,
+        NotQoi,
         InvalidDesc,
-        IoError,
         MismatchedDesc,
         NotEnoughSpace,
-        NotQoi,
         NotRegularFile,
-        TooShort,
+        FileExists,
+        FileNotExists,
+        IoError,
+        BadAlloc,
     };
 
     struct Pixel
