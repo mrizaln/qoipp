@@ -295,6 +295,94 @@ int main()
         expect(rr::equal(encoded, qoi));
     } | simple_cases;
 
+    "image encode into buffer from span"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        "with sufficient buffer"_test = [&] {
+            auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
+            auto buffer  = Vec(worst);
+            auto count   = qoipp::encode_into(buffer, raw, desc).value();
+            auto encoded = CSpan{ buffer.begin(), count };
+
+            expect(that % encoded.size() == qoi.size());
+            expect(rr::equal(encoded, qoi));
+        };
+
+        "with insufficient buffer"_test = [&] {
+            auto buffer = Vec(512);
+            auto res    = qoipp::encode_into(buffer, raw, desc);
+
+            expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
+            expect(rr::equal(buffer, rv::take(qoi, 512))) << "image should partially encoded";
+        };
+    } | simple_cases;
+
+    "image encode into buffer from function"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto gen = [&](usize index) -> qoipp::Pixel {
+            auto offset = index * static_cast<usize>(desc.channels);
+            return {
+                raw[offset],
+                raw[offset + 1],
+                raw[offset + 2],
+                desc.channels == qoipp::Channels::RGBA ? raw[offset + 3] : static_cast<u8>(0xFF),
+            };
+        };
+
+        "with sufficient buffer"_test = [&] {
+            auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
+            auto buffer  = Vec(worst);
+            auto count   = qoipp::encode_into(buffer, gen, desc).value();
+            auto encoded = CSpan{ buffer.begin(), count };
+
+            expect(that % encoded.size() == qoi.size());
+            expect(rr::equal(encoded, qoi));
+        };
+
+        "with insufficient buffer"_test = [&] {
+            auto buffer = Vec(512);
+            auto res    = qoipp::encode_into(buffer, gen, desc);
+
+            expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
+            expect(rr::equal(buffer, rv::take(qoi, 512))) << "image should partially encoded";
+        };
+    } | simple_cases;
+
+    "image encode into function from span"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto result = qoipp::Vec{};
+        auto out    = [&](u8 byte) { result.push_back(byte); };
+        auto res    = qoipp::encode_into(out, raw, desc).value();
+
+        expect(that % res == qoi.size());
+        expect(that % result.size() == qoi.size());
+        expect(rr::equal(result, qoi));
+    } | simple_cases;
+
+    "image encode into function from function"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto gen = [&](usize index) -> qoipp::Pixel {
+            auto offset = index * static_cast<usize>(desc.channels);
+            return {
+                raw[offset],
+                raw[offset + 1],
+                raw[offset + 2],
+                desc.channels == qoipp::Channels::RGBA ? raw[offset + 3] : static_cast<u8>(0xFF),
+            };
+        };
+
+        auto result = qoipp::Vec{};
+        auto out    = [&](u8 byte) { result.push_back(byte); };
+        auto res    = qoipp::encode_into(out, gen, desc).value();
+
+        expect(that % res == qoi.size());
+        expect(that % result.size() == qoi.size());
+        expect(rr::equal(result, qoi));
+    } | simple_cases;
+
     "simple image decode"_test = [&](auto&& input) {
         const auto& [desc, raw, qoi, _] = input;
 
@@ -326,6 +414,38 @@ int main()
         expect(actualdesc == rgba_desc);
         expect(that % decoded.size() == rgba_image.size());
         expect(rr::equal(decoded, rgba_image)) << compare(rgba_image, decoded);
+    } | simple_cases;
+
+    "image decode into buffer"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto size       = desc.width * desc.height * static_cast<usize>(desc.channels);
+        auto buffer     = Vec(size);
+        auto actualdesc = qoipp::decode_into(buffer, qoi).value();
+        auto decoded    = CSpan{ buffer.begin(), size };
+
+        expect(actualdesc == desc);
+        expect(that % decoded.size() == raw.size());
+        expect(rr::equal(decoded, raw)) << compare(raw, decoded);
+    } | simple_cases;
+
+    "image decode into function"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto result = qoipp::Vec{};
+        auto out    = [&](qoipp::Pixel pixel) {
+            auto arr = std::bit_cast<std::array<u8, 4>>(pixel);
+            if (desc.channels == qoipp::Channels::RGBA) {
+                result.insert(result.end(), arr.begin(), arr.begin() + 4);
+            } else {
+                result.insert(result.end(), arr.begin(), arr.begin() + 3);
+            }
+        };
+        auto actualdesc = qoipp::decode_into(out, qoi).value();
+
+        expect(actualdesc == desc);
+        expect(that % result.size() == raw.size());
+        expect(rr::equal(result, raw)) << compare(raw, result);
     } | simple_cases;
 
     "image encode to and decode from file"_test = [&](auto&& input) {
