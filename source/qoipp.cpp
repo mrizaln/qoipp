@@ -545,16 +545,19 @@ namespace qoipp
     {
         switch (err) {
         case Error::Empty: return "Data is empty";
+        case Error::TooShort: return "Data is too short";
+        case Error::NotQoi: return "Not a qoi file";
+        case Error::InvalidDesc: return "Image description is invalid";
+        case Error::MismatchedDesc: return "Image description does not match the data";
+        case Error::NotEnoughSpace: return "Buffer does not have enough space";
+        case Error::NotRegularFile: return "Not a regular file";
         case Error::FileExists: return "File already exists";
         case Error::FileNotExists: return "File does not exist";
-        case Error::InvalidDesc: return "Image description is invalid";
         case Error::IoError: return "Unable to do read or write operation";
-        case Error::MismatchedDesc: return "Image description does not match the data";
-        case Error::NotQoi: return "Not a qoi file";
-        case Error::NotRegularFile: return "Not a regular file";
-        case Error::TooShort: return "Data is too short";
-        default: return "Unknown";
+        case Error::BadAlloc: return "Failed to allocate memory";
         }
+
+        return "Unknown";
     }
 
     Result<Desc> read_header(CSpan data) noexcept
@@ -565,10 +568,10 @@ namespace qoipp
             return make_error<Desc>(Error::TooShort);
         }
 
-        using Magic = decltype(constants::magic);
-        auto* magic = reinterpret_cast<const Magic*>(data.data());
+        auto magic = std::array<char, constants::magic.size()>{};
+        std::memcpy(magic.data(), data.data(), magic.size());
 
-        if (std::memcmp(magic, constants::magic.data(), constants::magic.size()) != 0) {
+        if (magic != constants::magic) {
             return make_error<Desc>(Error::NotQoi);
         }
 
@@ -621,7 +624,7 @@ namespace qoipp
     Result<Vec> encode(CSpan data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto bytes_count = static_cast<usize>(width * height * static_cast<u32>(channels));
+        const auto bytes_count = static_cast<usize>(static_cast<usize>(channels) * width * height);
 
         if (data.size() == 0) {
             return make_error<Vec>(Error::Empty);
@@ -632,10 +635,16 @@ namespace qoipp
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const auto worst_size = width * height * (static_cast<usize>(channels) + 1)    // chanels + 1 tag
+        const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // chanels + 1 tag
                               + constants::header_size + constants::end_marker.size();
 
-        auto result = Vec(worst_size);
+        auto result = Vec{};
+        try {
+            result = Vec(worst_size);
+        } catch (...) {
+            return make_error<Vec>(Error::BadAlloc);
+        }
+
         auto writer = impl::SimpleByteWriter<false>{ result };
         auto reader = impl::SimplePixelReader{ data, channels };
 
@@ -653,10 +662,16 @@ namespace qoipp
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const auto worst_size = width * height * (static_cast<usize>(channels) + 1)    // OP_RGBA
+        const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // OP_RGBA
                               + constants::header_size + constants::end_marker.size();
 
-        auto result = Vec(worst_size);
+        auto result = Vec{};
+        try {
+            result = Vec(worst_size);
+        } catch (...) {
+            return make_error<Vec>(Error::BadAlloc);
+        }
+
         auto writer = impl::SimpleByteWriter<false>{ result };
         auto reader = impl::FuncPixelReader{ func, channels };
 
@@ -684,7 +699,13 @@ namespace qoipp
 
         channels = dest;
 
-        auto result = Vec(width * height * static_cast<usize>(dest));
+        auto result = Vec{};
+        try {
+            result = Vec(static_cast<usize>(dest) * width * height);
+        } catch (...) {
+            return make_error<Image>(Error::BadAlloc);
+        }
+
         auto writer = impl::SimplePixelWriter<false>{ result, dest };
 
         impl::decode(writer, data, src, width, height);
@@ -707,7 +728,8 @@ namespace qoipp
     Result<usize> encode_into(Span out, CSpan data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto bytes_count = static_cast<usize>(width * height * static_cast<u32>(channels));
+
+        const auto bytes_count = static_cast<usize>(channels) * width * height;
 
         if (data.size() == 0) {
             return make_error<usize>(Error::Empty);
@@ -747,7 +769,8 @@ namespace qoipp
     Result<usize> encode_into(ByteSinkFun out, CSpan data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto bytes_count = static_cast<usize>(width * height * static_cast<u32>(channels));
+
+        const auto bytes_count = static_cast<usize>(channels) * width * height;
 
         if (data.size() == 0) {
             return make_error<usize>(Error::Empty);
@@ -794,7 +817,7 @@ namespace qoipp
         const auto src  = channels;
         const auto dest = target.value_or(channels);
 
-        if (out.size() < width * height * static_cast<usize>(src)) {
+        if (out.size() < static_cast<usize>(src) * width * height) {
             return make_error<Desc>(Error::NotEnoughSpace);
         }
 
