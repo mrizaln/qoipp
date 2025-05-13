@@ -40,10 +40,10 @@ namespace qoipp
         InvalidDesc,
         IoError,
         MismatchedDesc,
+        NotEnoughSpace,
         NotQoi,
         NotRegularFile,
         TooShort,
-        NotEnoughSpace,
     };
 
     struct Pixel
