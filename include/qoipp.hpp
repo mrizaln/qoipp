@@ -36,6 +36,7 @@ namespace qoipp
     {
         Empty = 1,
         TooShort,
+        TooBig,
         NotQoi,
         InvalidDesc,
         MismatchedDesc,
