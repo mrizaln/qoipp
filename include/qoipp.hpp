@@ -43,6 +43,7 @@ namespace qoipp
         NotQoi,
         NotRegularFile,
         TooShort,
+        NotEnoughSpace,
     };
 
     struct Pixel
@@ -138,7 +139,9 @@ namespace qoipp
     };
 #endif
 
-    using PixelGenFun = std::function<Pixel(std::size_t pixel_index)>;
+    using PixelGenFun  = std::function<Pixel(std::size_t index)>;
+    using PixelSinkFun = std::function<void(Pixel pixel)>;
+    using ByteSinkFun  = std::function<void(std::uint8_t byte)>;
 
     /**
      * @brief Get a human readable description for an error value.
@@ -281,6 +284,20 @@ namespace qoipp
         std::optional<Channels> target          = std::nullopt,
         bool                    flip_vertically = false
     ) noexcept;
+
+    Result<std::size_t> encode_into(Span out, CSpan data, Desc desc);
+    Result<std::size_t> encode_into(Span out, PixelGenFun in, Desc desc);
+    Result<std::size_t> encode_into(ByteSinkFun out, CSpan data, Desc desc);
+    Result<std::size_t> encode_into(ByteSinkFun out, PixelGenFun in, Desc desc);
+
+    Result<Desc> decode_into(
+        Span                    out,
+        CSpan                   data,
+        std::optional<Channels> target          = std::nullopt,
+        bool                    flip_vertically = false
+    );
+
+    Result<Desc> decode_into(PixelSinkFun out, CSpan data);
 
     /**
      * @brief Encode the given data into a QOI image and write it to a file.
