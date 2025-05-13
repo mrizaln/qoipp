@@ -446,9 +446,9 @@ namespace qoipp::impl
             chunks.write_run(run);
             run = 0;
         }
-
         chunks.write_end_marker();
-        return chunks.count();
+
+        return out.ok() ? std::optional{ chunks.count() } : std::nullopt;
     }
 
     template <PixelWriter Out>

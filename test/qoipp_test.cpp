@@ -309,11 +309,11 @@ int main()
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = Vec(512);
+            auto buffer = Vec(1011);
             auto res    = qoipp::encode_into(buffer, raw, desc);
 
             expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
-            expect(rr::equal(buffer, rv::take(qoi, 512))) << "image should partially encoded";
+            expect(rr::equal(buffer, rv::take(qoi, 1011))) << "image should partially encoded";
         };
     } | simple_cases;
 
@@ -341,11 +341,11 @@ int main()
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = Vec(512);
+            auto buffer = Vec(1011);
             auto res    = qoipp::encode_into(buffer, gen, desc);
 
             expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
-            expect(rr::equal(buffer, rv::take(qoi, 512))) << "image should partially encoded";
+            expect(rr::equal(buffer, rv::take(qoi, 1011))) << "image should partially encoded";
         };
     } | simple_cases;
 
