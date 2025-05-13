@@ -27,6 +27,7 @@
 static_assert(std::same_as<qoipp::Result<int>, std::expected<int, qoipp::Error>>);
 #endif
 
+namespace rr = ranges;
 namespace rv = ranges::views;
 
 using i8  = std::int8_t;
@@ -51,17 +52,10 @@ using qoipp::Vec;
 namespace fs = std::filesystem;
 namespace ut = boost::ut;
 
-using namespace ut::literals;
-using namespace ut::operators;
-
 using qoipp::Image;
 
 static inline const fs::path g_test_image_dir = fs::current_path() / "qoi_test_images";
 static constexpr auto        g_do_test_images = true;
-
-// ----------------
-// helper functions
-// ----------------
 
 fs::path mktemp()
 {
@@ -78,7 +72,7 @@ Vec read_file(const fs::path& path)
     return data;
 }
 
-Vec rbg_only(CSpan data)
+Vec to_rgb(CSpan data)
 {
     if (data.size() % 4) {
         throw std::invalid_argument("data size must be a multiple of 4");
@@ -87,8 +81,25 @@ Vec rbg_only(CSpan data)
     auto result = Vec{};
     result.reserve(data.size() / 4 * 3);
 
-    for (const auto& chunk : rv::chunk(data, 4)) {
+    for (auto chunk : rv::chunk(data, 4)) {
         result.insert(result.end(), chunk.begin(), chunk.begin() + 3);
+    }
+
+    return result;
+}
+
+Vec to_rgba(CSpan data)
+{
+    if (data.size() % 3) {
+        throw std::invalid_argument("data size must be a multiple of 3");
+    }
+
+    auto result = Vec{};
+    result.reserve(data.size() / 3 * 4);
+
+    for (auto chunk : rv::chunk(data, 3)) {
+        result.insert(result.end(), chunk.begin(), chunk.begin() + 3);
+        result.push_back(0xFF);
     }
 
     return result;
@@ -185,7 +196,7 @@ std::string compare(CSpan lhs, CSpan rhs)
         return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
     });
 
-    auto buffer = std::string{};
+    auto buffer = std::string{ '\n' };
     auto out    = std::back_inserter(buffer);
 
     const auto red   = fg(fmt::color::orange_red);
@@ -206,13 +217,13 @@ std::string compare(CSpan lhs, CSpan rhs)
             auto offset = elem.begin() - lhs.begin();
             prev_common = false;
             auto joined = fmt::join(elem, " ");
-            fmt::format_to(out, red, "{:>5}-{:>5}: {:02x}\n", offset, offset + chunk, joined);
+            fmt::format_to(out, red, "{:04x}-{:04x}: {:02x}\n", offset, offset + chunk, joined);
         } break;
         case E::Add: {
             auto offset = elem.begin() - rhs.begin();
             prev_common = false;
             auto joined = fmt::join(elem, " ");
-            fmt::format_to(out, green, "{:>5}-{:>5}: {:02x}\n", offset, offset + chunk, joined);
+            fmt::format_to(out, green, "{:04x}-{:04x}: {:02x}\n", offset, offset + chunk, joined);
         } break;
         }
     }
@@ -220,250 +231,186 @@ std::string compare(CSpan lhs, CSpan rhs)
     return buffer;
 }
 
-// ----------------------
-// tests starts from here
-// ----------------------
+int main()
+{
+    using namespace ut::literals;
+    using namespace ut::operators;
+    using ut::expect, ut::that;
 
-ut::suite three_channel_image = [] {
-    constexpr qoipp::Desc desc{
+    // rgb
+    // ---
+    constexpr auto desc_3 = qoipp::Desc{
         .width      = 29,
         .height     = 17,
         .channels   = qoipp::Channels::RGB,
         .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const Vec raw_image = {
+    const auto raw_image_3 = Vec{
 #include "image_raw_3.txt"
     };
 
-    const Vec qoi_image = {
+    const auto qoi_image_3 = Vec{
 #include "image_qoi_3.txt"
     };
 
-    const Vec qoi_image_incomplete = {
+    const auto qoi_image_incomplete_3 = Vec{
 #include "image_qoi_3_incomplete.txt"
     };
 
-    "3-channel image encode"_test = [&] {
-        const auto encoded = qoipp::encode(raw_image, desc).value();
-        ut::expect(ut::that % encoded.size() == qoi_image.size());
-        ut::expect(std::memcmp(encoded.data(), qoi_image.data(), qoi_image.size()) == 0)
-            << compare(qoi_image, encoded);
-    };
+    const auto test_case_3 = std::tie(desc_3, raw_image_3, qoi_image_3, qoi_image_incomplete_3);
+    // ---
 
-    "3-channel image decode"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image).value();
-        ut::expect(actualdesc == desc);
-        ut::expect(ut::that % decoded.size() == raw_image.size());
-        ut::expect(std::memcmp(decoded.data(), raw_image.data(), raw_image.size()) == 0)
-            << compare(raw_image, decoded);
-    };
-
-    "3-channel image decode wants RGB only"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image, qoipp::Channels::RGB).value();
-        ut::expect(actualdesc == desc);
-        ut::expect(ut::that % decoded.size() == raw_image.size());
-        ut::expect(std::memcmp(decoded.data(), raw_image.data(), raw_image.size()) == 0)
-            << compare(raw_image, decoded);
-    };
-
-    "3-channel image encode to and decode from file"_test = [&] {
-        const auto qoifile = mktemp();
-
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            ut::expect(res.has_value());
-        }));
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::FileExists);
-        }));
-
-        qoipp::Image decoded;
-        ut::expect(ut::nothrow([&] { decoded = qoipp::decode_from_file(qoifile).value(); }));
-        ut::expect(decoded.desc == desc);
-        ut::expect(ut::that % decoded.data.size() == raw_image.size());
-        ut::expect(std::memcmp(decoded.data.data(), raw_image.data(), raw_image.size()) == 0)
-            << compare(raw_image, decoded.data);
-
-        std::ofstream ofs{ qoifile, std::ios::trunc };
-        ut::expect(fs::is_empty(qoifile));
-
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::decode_from_file(qoifile);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::Empty);
-        })) << "Empty file should error with qoipp::Error::Empty";
-
-        fs::remove(qoifile);
-
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::decode_from_file(qoifile);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::FileNotExists);
-        })) << "Non-existent file should error with qoipp::Error::FileNotExists";
-
-        ut::expect(!fs::exists(qoifile)) << "File should not be created if it previously not exist";
-    };
-
-    "3-channel image header read"_test = [&] {
-        const auto header = qoipp::read_header(qoi_image);
-        ut::expect(header.has_value()) << "Invalid header";
-        ut::expect(*header == desc);
-
-        const auto empty_header = qoipp::read_header(Vec{});
-        ut::expect(!empty_header.has_value());
-
-        const auto invalid_header_str = Vec{ 0x00, 0x01, 0x02, 0x03 };
-        const auto invalid_header     = qoipp::read_header(invalid_header_str);
-        ut::expect(!invalid_header.has_value());
-    };
-
-    "3-channel image header read from file"_test = [&] {
-        const auto qoifile = mktemp();
-        ut::expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw_image, desc, false); }));
-
-        const auto header = qoipp::read_header(qoifile);
-        ut::expect(header.has_value()) << "Invalid header";
-        ut::expect(*header == desc);
-
-        std::ofstream ofs{ qoifile, std::ios::trunc };
-        ut::expect(fs::is_empty(qoifile));
-
-        const auto empty_header = qoipp::read_header(qoifile);
-        ut::expect(!empty_header.has_value());
-
-        fs::remove(qoifile);
-    };
-
-    "3-channel image decode on incomplete data should still work"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image_incomplete).value();
-        ut::expect(actualdesc == desc);
-        ut::expect(ut::that % decoded.size() == raw_image.size());
-    };
-};
-
-ut::suite four_channel_image = [] {
-    constexpr qoipp::Desc desc{
+    // rgba
+    // ----
+    constexpr auto desc_4 = qoipp::Desc{
         .width      = 24,
         .height     = 14,
         .channels   = qoipp::Channels::RGBA,
         .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const Vec raw_image = {
+    const auto raw_image_4 = Vec{
 #include "image_raw_4.txt"
     };
 
-    const Vec qoi_image = {
+    const auto qoi_image_4 = Vec{
 #include "image_qoi_4.txt"
     };
 
-    const Vec qoi_image_incomplete = {
+    const auto qoi_image_incomplete_4 = Vec{
 #include "image_qoi_4_incomplete.txt"
     };
 
-    "4-channel image encode"_test = [&] {
-        const auto encoded = qoipp::encode(raw_image, desc).value();
-        ut::expect(ut::that % encoded.size() == qoi_image.size());
-        ut::expect(std::memcmp(encoded.data(), qoi_image.data(), qoi_image.size()) == 0)
-            << compare(qoi_image, encoded);
-    };
+    const auto test_case_4 = std::tie(desc_4, raw_image_4, qoi_image_4, qoi_image_incomplete_4);
+    // ----
 
-    "4-channel image decode"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image).value();
-        ut::expect(actualdesc == desc);
-        ut::expect(ut::that % decoded.size() == raw_image.size());
-        ut::expect(std::memcmp(decoded.data(), raw_image.data(), raw_image.size()) == 0)
-            << compare(raw_image, decoded);
-    };
+    const auto simple_cases = std::array{ test_case_3, test_case_4 };
 
-    "4-channel image decode wants RGB only"_test = [&] {
-        auto rgb_image = rbg_only(raw_image);
+    "simple image encode"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        const auto encoded = qoipp::encode(raw, desc).value();
+        expect(that % encoded.size() == qoi.size());
+        expect(rr::equal(encoded, qoi));
+    } | simple_cases;
+
+    "simple image decode"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        const auto [decoded, actualdesc] = qoipp::decode(qoi).value();
+        expect(actualdesc == desc);
+        expect(that % decoded.size() == raw.size());
+        expect(rr::equal(decoded, raw)) << compare(raw, decoded);
+    } | simple_cases;
+
+    "simple image decode wants RGB"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto rgb_image = desc.channels == qoipp::Channels::RGB ? raw : to_rgb(raw);
         auto rgb_desc  = qoipp::Desc{ desc.width, desc.height, qoipp::Channels::RGB, desc.colorspace };
 
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image, qoipp::Channels::RGB).value();
-        ut::expect(actualdesc == rgb_desc);
-        ut::expect(ut::that % decoded.size() == rgb_image.size());
-        ut::expect(std::memcmp(decoded.data(), rgb_image.data(), rgb_image.size()) == 0)
-            << compare(rgb_image, decoded);
-    };
+        const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGB).value();
+        expect(actualdesc == rgb_desc);
+        expect(that % decoded.size() == rgb_image.size());
+        expect(rr::equal(decoded, rgb_image)) << compare(rgb_image, decoded);
+    } | simple_cases;
 
-    "4-channel image encode to and decode from file"_test = [&] {
+    "simple image decode wants RGBA"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        auto rgba_image = desc.channels == qoipp::Channels::RGBA ? raw : to_rgba(raw);
+        auto rgba_desc  = qoipp::Desc{ desc.width, desc.height, qoipp::Channels::RGBA, desc.colorspace };
+
+        const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGBA).value();
+        expect(actualdesc == rgba_desc);
+        expect(that % decoded.size() == rgba_image.size());
+        expect(rr::equal(decoded, rgba_image)) << compare(rgba_image, decoded);
+    } | simple_cases;
+
+    "image encode to and decode from file"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
         auto qoifile = mktemp();
 
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            ut::expect(res.has_value());
+        expect(ut::nothrow([&] {
+            const auto res = qoipp::encode_to_file(qoifile, raw, desc, false);
+            expect(res.has_value());
         }));
-        ut::expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw_image, desc, false);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::FileExists);
+        expect(ut::nothrow([&] {
+            const auto res = qoipp::encode_to_file(qoifile, raw, desc, false);
+            expect(not res.has_value() and res.error() == qoipp::Error::FileExists);
         }));
 
         qoipp::Image decoded;
-        ut::expect(ut::nothrow([&] { decoded = qoipp::decode_from_file(qoifile).value(); }));
-        ut::expect(decoded.desc == desc);
-        ut::expect(ut::that % decoded.data.size() == raw_image.size());
-        ut::expect(std::memcmp(decoded.data.data(), raw_image.data(), raw_image.size()) == 0)
-            << compare(raw_image, decoded.data);
+        expect(ut::nothrow([&] { decoded = qoipp::decode_from_file(qoifile).value(); }));
+        expect(decoded.desc == desc);
+        expect(that % decoded.data.size() == raw.size());
+        expect(rr::equal(decoded.data, raw)) << compare(raw, decoded.data);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
-        ut::expect(fs::is_empty(qoifile));
+        expect(fs::is_empty(qoifile));
 
-        ut::expect(ut::nothrow([&] {
+        expect(ut::nothrow([&] {
             const auto res = qoipp::decode_from_file(qoifile);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::Empty);
+            expect(not res.has_value() and res.error() == qoipp::Error::Empty);
         })) << "Empty file should error with qoipp::Error::Empty";
 
         fs::remove(qoifile);
 
-        ut::expect(ut::nothrow([&] {
+        expect(ut::nothrow([&] {
             const auto res = qoipp::decode_from_file(qoifile);
-            ut::expect(not res.has_value() and res.error() == qoipp::Error::FileNotExists);
+            expect(not res.has_value() and res.error() == qoipp::Error::FileNotExists);
         })) << "Non-existent file should error with qoipp::Error::FileNotExists";
 
-        ut::expect(!fs::exists(qoifile)) << "File should not be created if it previously not exist";
-    };
+        expect(!fs::exists(qoifile)) << "File should not be created if it previously not exist";
+    } | simple_cases;
 
-    "4-channel image header read"_test = [&] {
-        const auto header = qoipp::read_header(qoi_image);
-        ut::expect(header.has_value()) << "Invalid header";
-        ut::expect(*header == desc);
+    "image header read"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
+        const auto header = qoipp::read_header(qoi);
+        expect(header.has_value()) << "Invalid header";
+        expect(*header == desc);
 
         const auto empty_header = qoipp::read_header(Vec{});
-        ut::expect(!empty_header.has_value());
+        expect(!empty_header.has_value());
 
         const auto invalid_header_str = Vec{ 0x00, 0x01, 0x02, 0x03 };
         const auto invalid_header     = qoipp::read_header(invalid_header_str);
-        ut::expect(!invalid_header.has_value());
-    };
+        expect(!invalid_header.has_value());
+    } | simple_cases;
 
-    "4-channel image header read from file"_test = [&] {
+    "image header read from file"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, _] = input;
+
         const auto qoifile = mktemp();
-        ut::expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw_image, desc, false); }));
+        expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw, desc, false); }));
 
         const auto header = qoipp::read_header(qoifile);
-        ut::expect(header.has_value()) << "Invalid header";
-        ut::expect(*header == desc);
+        expect(header.has_value()) << "Invalid header";
+        expect(*header == desc);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
-        ut::expect(fs::is_empty(qoifile));
+        expect(fs::is_empty(qoifile));
 
         const auto empty_header = qoipp::read_header(qoifile);
-        ut::expect(!empty_header.has_value());
+        expect(!empty_header.has_value());
 
         fs::remove(qoifile);
-    };
+    } | simple_cases;
 
-    "4-channel image decode on incomplete data should still work"_test = [&] {
-        const auto [decoded, actualdesc] = qoipp::decode(qoi_image_incomplete).value();
-        ut::expect(actualdesc == desc);
-        ut::expect(ut::that % decoded.size() == raw_image.size());
-    };
-};
+    "image decode on incomplete data should still work"_test = [&](auto&& input) {
+        const auto& [desc, raw, qoi, qoi_incomplete] = input;
 
-ut::suite testing_on_real_images = [] {
+        const auto [decoded, actualdesc] = qoipp::decode(qoi_incomplete).value();
+        expect(actualdesc == desc);
+        expect(that % decoded.size() == raw.size());
+    } | simple_cases;
+
+    // return early if testing on test images is not enabled
     if (not g_do_test_images) {
-        return;
+        return 0;
     }
 
     fmt::print("Testing on real images...\n");
@@ -471,7 +418,7 @@ ut::suite testing_on_real_images = [] {
     if (!fs::exists(g_test_image_dir)) {
         fmt::println("Test image directory '{}' does not exist, skipping test", g_test_image_dir);
         fmt::println("Use the `fetch_test_images.sh` script to download the test images");
-        return;
+        return 0;
     }
 
     for (auto entry : fs::directory_iterator{ g_test_image_dir }) {
@@ -483,10 +430,9 @@ ut::suite testing_on_real_images = [] {
                 const auto qoi_image   = qoi_encode(image);
                 const auto qoipp_image = qoipp::encode(image.data, image.desc).value();
 
-                ut::expect(ut::that % qoi_image.data.size() == qoipp_image.size());
-                ut::expect(qoi_image.desc == image.desc);
-                ut::expect(std::memcmp(qoi_image.data.data(), qoipp_image.data(), qoipp_image.size()) == 0)
-                    << compare(qoi_image.data, qoipp_image);
+                expect(that % qoi_image.data.size() == qoipp_image.size());
+                expect(qoi_image.desc == image.desc);
+                expect(rr::equal(qoi_image.data, qoipp_image)) << compare(qoi_image.data, qoipp_image);
             };
         }
         if (entry.path().extension() == ".qoi") {
@@ -498,16 +444,10 @@ ut::suite testing_on_real_images = [] {
                 const auto [raw_image_ref, desc_ref] = qoi_decode(qoi_image);
                 const auto [raw_image, desc]         = qoipp::decode_from_file(entry.path()).value();
 
-                ut::expect(ut::that % raw_image_ref.size() == raw_image.size());
-                ut::expect(desc_ref == desc);
-                ut::expect(std::memcmp(raw_image_ref.data(), raw_image.data(), raw_image.size()) == 0)
-                    << compare(raw_image_ref, raw_image);
+                expect(that % raw_image_ref.size() == raw_image.size());
+                expect(desc_ref == desc);
+                expect(rr::equal(raw_image_ref, raw_image)) << compare(raw_image_ref, raw_image);
             };
         }
     }
-};
-
-int main()
-{
-    /* empty */
 }
