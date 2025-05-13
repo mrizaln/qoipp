@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <utility>
 
-// utils ana aliases
+// utils and aliases
 namespace qoipp
 {
     namespace fs = std::filesystem;
@@ -107,6 +107,28 @@ namespace qoipp
         return width > 0 and height > 0    //
            and (channels == Channels::RGBA or channels == Channels::RGB)
            and (colorspace == Colorspace::Linear or colorspace == Colorspace::sRGB);
+    }
+
+    std::optional<usize> count_bytes(const Desc& desc)
+    {
+        // detect overflow: https://stackoverflow.com/a/1815371/16506263
+        auto overflows = [](usize a, usize b) {
+            const auto c = a * b;
+            return a != 0 and c / a != b;
+        };
+
+        const auto& [width, height, channels, _] = desc;
+        if (overflows(width, height)) {
+            return std::nullopt;
+        }
+
+        const auto pixel_count = static_cast<usize>(width) * height;
+        const auto chan        = static_cast<usize>(channels);
+        if (overflows(pixel_count, chan)) {
+            return std::nullopt;
+        }
+
+        return pixel_count * chan;
     }
 }
 
@@ -546,6 +568,7 @@ namespace qoipp
         switch (err) {
         case Error::Empty: return "Data is empty";
         case Error::TooShort: return "Data is too short";
+        case Error::TooBig: return "Image is too big to process";
         case Error::NotQoi: return "Not a qoi file";
         case Error::InvalidDesc: return "Image description is invalid";
         case Error::MismatchedDesc: return "Image description does not match the data";
@@ -624,12 +647,13 @@ namespace qoipp
     Result<Vec> encode(CSpan data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
-        const auto bytes_count = static_cast<usize>(static_cast<usize>(channels) * width * height);
 
         if (data.size() == 0) {
             return make_error<Vec>(Error::Empty);
         } else if (not desc_is_valid(desc)) {
             return make_error<Vec>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<Vec>(Error::TooBig);
         } else if (data.size() != bytes_count) {
             return make_error<Vec>(Error::MismatchedDesc);
         }
@@ -659,6 +683,8 @@ namespace qoipp
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
             return make_error<Vec>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<Vec>(Error::TooBig);
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
@@ -681,10 +707,121 @@ namespace qoipp
         return result;
     }
 
+    Result<usize> encode_into(Span out, CSpan data, Desc desc)
+    {
+        const auto [width, height, channels, colorspace] = desc;
+
+        if (data.size() == 0) {
+            return make_error<usize>(Error::Empty);
+        } else if (not desc_is_valid(desc)) {
+            return make_error<usize>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(Error::TooBig);
+        } else if (data.size() != bytes_count) {
+            return make_error<usize>(Error::MismatchedDesc);
+        }
+
+        auto writer = impl::SimpleByteWriter<true>{ out };
+        auto reader = impl::SimplePixelReader{ data, channels };
+
+        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        if (not count) {
+            return make_error<usize>(Error::NotEnoughSpace);
+        }
+        return count.value();
+    }
+
+    Result<usize> encode_into(Span out, PixelGenFun in, Desc desc)
+    {
+        const auto [width, height, channels, colorspace] = desc;
+        if (not desc_is_valid(desc)) {
+            return make_error<usize>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(Error::TooBig);
+        }
+
+        auto writer = impl::SimpleByteWriter<true>{ out };
+        auto reader = impl::FuncPixelReader{ in, channels };
+
+        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        if (not count) {
+            return make_error<usize>(Error::NotEnoughSpace);
+        }
+        return count.value();
+    }
+
+    Result<usize> encode_into(ByteSinkFun out, CSpan data, Desc desc)
+    {
+        const auto [width, height, channels, colorspace] = desc;
+
+        if (data.size() == 0) {
+            return make_error<usize>(Error::Empty);
+        } else if (not desc_is_valid(desc)) {
+            return make_error<usize>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(Error::TooBig);
+        } else if (data.size() != bytes_count) {
+            return make_error<usize>(Error::MismatchedDesc);
+        }
+
+        auto writer = impl::FuncByteWriter{ out };
+        auto reader = impl::SimplePixelReader{ data, channels };
+
+        // TODO: allow function interruption and handle interruption
+        return impl::encode(writer, reader, width, height, channels, colorspace).value();
+    }
+
+    Result<usize> encode_into(ByteSinkFun out, PixelGenFun in, Desc desc)
+    {
+        const auto [width, height, channels, colorspace] = desc;
+        if (not desc_is_valid(desc)) {
+            return make_error<usize>(Error::InvalidDesc);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(Error::TooBig);
+        }
+
+        auto writer = impl::FuncByteWriter{ out };
+        auto reader = impl::FuncPixelReader{ in, channels };
+
+        // TODO: allow function and handle interruption
+        return impl::encode(writer, reader, width, height, channels, colorspace).value();
+    }
+
+    Result<void> encode_to_file(const fs::path& path, CSpan data, Desc desc, bool overwrite) noexcept
+    {
+        if (fs::exists(path) and not overwrite) {
+            return make_error<void>(Error::FileExists);
+        } else if (fs::exists(path) and not fs::is_regular_file(path)) {
+            return make_error<void>(Error::NotRegularFile);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<void>(Error::TooBig);
+        }
+
+        auto encoded = encode(data, desc);
+        if (not encoded) {
+            return make_error<void>(encoded.error());
+        }
+
+        auto file = std::ofstream{ path, std::ios::binary | std::ios::trunc };
+        if (not file.is_open()) {
+            return make_error<void>(Error::IoError);
+        }
+
+        const auto size = static_cast<std::streamsize>(encoded->size());
+        file.write(reinterpret_cast<const char*>(encoded->data()), size);
+        if (not file) {
+            return make_error<void>(Error::IoError);
+        }
+
+        return {};
+    }
+
     Result<Image> decode(CSpan data, std::optional<Channels> target, bool flip_vertically) noexcept
     {
         if (data.size() == 0) {
             return make_error<Image>(Error::Empty);
+        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
+            return make_error<Image>(Error::TooShort);
         }
 
         auto header = read_header(data);
@@ -699,9 +836,14 @@ namespace qoipp
 
         channels = dest;
 
+        const auto bytes_count = count_bytes(header.value());
+        if (not bytes_count) {
+            return make_error<Image>(Error::TooBig);
+        }
+
         auto result = Vec{};
         try {
-            result = Vec(static_cast<usize>(dest) * width * height);
+            result = Vec(*bytes_count);
         } catch (...) {
             return make_error<Image>(Error::BadAlloc);
         }
@@ -725,86 +867,12 @@ namespace qoipp
         };
     }
 
-    Result<usize> encode_into(Span out, CSpan data, Desc desc)
-    {
-        const auto [width, height, channels, colorspace] = desc;
-
-        const auto bytes_count = static_cast<usize>(channels) * width * height;
-
-        if (data.size() == 0) {
-            return make_error<usize>(Error::Empty);
-        } else if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        } else if (data.size() != bytes_count) {
-            return make_error<usize>(Error::MismatchedDesc);
-        }
-
-        auto writer = impl::SimpleByteWriter<true>{ out };
-        auto reader = impl::SimplePixelReader{ data, channels };
-
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
-        if (not count) {
-            return make_error<usize>(Error::NotEnoughSpace);
-        }
-        return count.value();
-    }
-
-    Result<usize> encode_into(Span out, PixelGenFun in, Desc desc)
-    {
-        const auto [width, height, channels, colorspace] = desc;
-        if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        }
-
-        auto writer = impl::SimpleByteWriter<true>{ out };
-        auto reader = impl::FuncPixelReader{ in, channels };
-
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
-        if (not count) {
-            return make_error<usize>(Error::NotEnoughSpace);
-        }
-        return count.value();
-    }
-
-    Result<usize> encode_into(ByteSinkFun out, CSpan data, Desc desc)
-    {
-        const auto [width, height, channels, colorspace] = desc;
-
-        const auto bytes_count = static_cast<usize>(channels) * width * height;
-
-        if (data.size() == 0) {
-            return make_error<usize>(Error::Empty);
-        } else if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        } else if (data.size() != bytes_count) {
-            return make_error<usize>(Error::MismatchedDesc);
-        }
-
-        auto writer = impl::FuncByteWriter{ out };
-        auto reader = impl::SimplePixelReader{ data, channels };
-
-        // TODO: allow function interruption and handle interruption
-        return impl::encode(writer, reader, width, height, channels, colorspace).value();
-    }
-
-    Result<usize> encode_into(ByteSinkFun out, PixelGenFun in, Desc desc)
-    {
-        const auto [width, height, channels, colorspace] = desc;
-        if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        }
-
-        auto writer = impl::FuncByteWriter{ out };
-        auto reader = impl::FuncPixelReader{ in, channels };
-
-        // TODO: allow function and handle interruption
-        return impl::encode(writer, reader, width, height, channels, colorspace).value();
-    }
-
     Result<Desc> decode_into(Span out, CSpan data, std::optional<Channels> target, bool flip_vertically)
     {
         if (data.size() == 0) {
             return make_error<Desc>(Error::Empty);
+        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
+            return make_error<Desc>(Error::TooShort);
         }
 
         auto header = read_header(data);
@@ -817,7 +885,9 @@ namespace qoipp
         const auto src  = channels;
         const auto dest = target.value_or(channels);
 
-        if (out.size() < static_cast<usize>(src) * width * height) {
+        if (const auto bytes_count = count_bytes(header.value()); not bytes_count) {
+            return make_error<Desc>(Error::TooBig);
+        } else if (out.size() < bytes_count) {
             return make_error<Desc>(Error::NotEnoughSpace);
         }
 
@@ -843,6 +913,8 @@ namespace qoipp
     {
         if (data.size() == 0) {
             return make_error<Desc>(Error::Empty);
+        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
+            return make_error<Desc>(Error::TooShort);
         }
 
         auto header = read_header(data);
@@ -856,33 +928,6 @@ namespace qoipp
         impl::decode(writer, data, channels, width, height);
 
         return std::move(header).value();
-    }
-
-    Result<void> encode_to_file(const fs::path& path, CSpan data, Desc desc, bool overwrite) noexcept
-    {
-        if (fs::exists(path) and not overwrite) {
-            return make_error<void>(Error::FileExists);
-        } else if (fs::exists(path) and not fs::is_regular_file(path)) {
-            return make_error<void>(Error::NotRegularFile);
-        }
-
-        auto encoded = encode(data, desc);
-        if (not encoded) {
-            return make_error<void>(encoded.error());
-        }
-
-        auto file = std::ofstream{ path, std::ios::binary | std::ios::trunc };
-        if (not file.is_open()) {
-            return make_error<void>(Error::IoError);
-        }
-
-        const auto size = static_cast<std::streamsize>(encoded->size());
-        file.write(reinterpret_cast<const char*>(encoded->data()), size);
-        if (not file) {
-            return make_error<void>(Error::IoError);
-        }
-
-        return {};
     }
 
     Result<Image> decode_from_file(
