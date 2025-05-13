@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 
 project(
   qoipp
-  VERSION 0.1.0
+  VERSION 0.3.0
   LANGUAGES CXX
   DESCRIPTION "QOI codec written in C++20")
 
