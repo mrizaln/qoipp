@@ -583,16 +583,16 @@ namespace qoipp
         return "Unknown";
     }
 
-    Result<Desc> read_header(CSpan data) noexcept
+    Result<Desc> read_header(CSpan in_data) noexcept
     {
-        if (data.size() == 0) {
+        if (in_data.size() == 0) {
             return make_error<Desc>(Error::Empty);
-        } else if (data.size() < constants::header_size) {
+        } else if (in_data.size() < constants::header_size) {
             return make_error<Desc>(Error::TooShort);
         }
 
         auto magic = std::array<char, constants::magic.size()>{};
-        std::memcpy(magic.data(), data.data(), magic.size());
+        std::memcpy(magic.data(), in_data.data(), magic.size());
 
         if (magic != constants::magic) {
             return make_error<Desc>(Error::NotQoi);
@@ -602,13 +602,13 @@ namespace qoipp
 
         u32 width, height;
 
-        std::memcpy(&width, data.data() + index, sizeof(u32));
+        std::memcpy(&width, in_data.data() + index, sizeof(u32));
         index += sizeof(u32);
-        std::memcpy(&height, data.data() + index, sizeof(u32));
+        std::memcpy(&height, in_data.data() + index, sizeof(u32));
         index += sizeof(u32);
 
-        auto channels   = to_channels(data[index++]);
-        auto colorspace = to_colorspace(data[index++]);
+        auto channels   = to_channels(in_data[index++]);
+        auto colorspace = to_colorspace(in_data[index++]);
 
         if (not channels or not colorspace or width == 0 or height == 0) {
             return make_error<Desc>(Error::InvalidDesc);
@@ -622,15 +622,15 @@ namespace qoipp
         };
     }
 
-    Result<Desc> read_header(const fs::path& path) noexcept
+    Result<Desc> read_header(const fs::path& in_path) noexcept
     {
-        if (not fs::exists(path)) {
+        if (not fs::exists(in_path)) {
             return make_error<Desc>(Error::FileNotExists);
-        } else if (not fs::is_regular_file(path)) {
+        } else if (not fs::is_regular_file(in_path)) {
             return make_error<Desc>(Error::NotRegularFile);
         }
 
-        auto file = std::ifstream{ path, std::ios::binary };
+        auto file = std::ifstream{ in_path, std::ios::binary };
         if (not file.is_open()) {
             return make_error<Desc>(Error::IoError);
         }
@@ -644,17 +644,17 @@ namespace qoipp
         return read_header(data);
     }
 
-    Result<Vec> encode(CSpan data, Desc desc) noexcept
+    Result<Vec> encode(CSpan in_data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
 
-        if (data.size() == 0) {
+        if (in_data.size() == 0) {
             return make_error<Vec>(Error::Empty);
         } else if (not desc_is_valid(desc)) {
             return make_error<Vec>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
             return make_error<Vec>(Error::TooBig);
-        } else if (data.size() != bytes_count) {
+        } else if (in_data.size() != bytes_count) {
             return make_error<Vec>(Error::MismatchedDesc);
         }
 
@@ -670,7 +670,7 @@ namespace qoipp
         }
 
         auto writer = impl::SimpleByteWriter<false>{ result };
-        auto reader = impl::SimplePixelReader{ data, channels };
+        auto reader = impl::SimplePixelReader{ in_data, channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace).value();
         result.resize(count);
@@ -678,7 +678,7 @@ namespace qoipp
         return result;
     }
 
-    Result<Vec> encode(PixelGenFun func, Desc desc) noexcept
+    Result<Vec> encode(PixelGenFun in_func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
@@ -699,7 +699,7 @@ namespace qoipp
         }
 
         auto writer = impl::SimpleByteWriter<false>{ result };
-        auto reader = impl::FuncPixelReader{ func, channels };
+        auto reader = impl::FuncPixelReader{ in_func, channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace).value();
         result.resize(count);
@@ -707,22 +707,22 @@ namespace qoipp
         return result;
     }
 
-    Result<usize> encode_into(Span out, CSpan data, Desc desc)
+    Result<usize> encode_into(Span out_buf, CSpan in_data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
-        if (data.size() == 0) {
+        if (in_data.size() == 0) {
             return make_error<usize>(Error::Empty);
         } else if (not desc_is_valid(desc)) {
             return make_error<usize>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
             return make_error<usize>(Error::TooBig);
-        } else if (data.size() != bytes_count) {
+        } else if (in_data.size() != bytes_count) {
             return make_error<usize>(Error::MismatchedDesc);
         }
 
-        auto writer = impl::SimpleByteWriter<true>{ out };
-        auto reader = impl::SimplePixelReader{ data, channels };
+        auto writer = impl::SimpleByteWriter<true>{ out_buf };
+        auto reader = impl::SimplePixelReader{ in_data, channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
         if (not count) {
@@ -731,7 +731,7 @@ namespace qoipp
         return count.value();
     }
 
-    Result<usize> encode_into(Span out, PixelGenFun in, Desc desc)
+    Result<usize> encode_into(Span out_buf, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
@@ -740,8 +740,8 @@ namespace qoipp
             return make_error<usize>(Error::TooBig);
         }
 
-        auto writer = impl::SimpleByteWriter<true>{ out };
-        auto reader = impl::FuncPixelReader{ in, channels };
+        auto writer = impl::SimpleByteWriter<true>{ out_buf };
+        auto reader = impl::FuncPixelReader{ in_func, channels };
 
         const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
         if (not count) {
@@ -750,28 +750,28 @@ namespace qoipp
         return count.value();
     }
 
-    Result<usize> encode_into(ByteSinkFun out, CSpan data, Desc desc)
+    Result<usize> encode_into(ByteSinkFun out_func, CSpan in_data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
-        if (data.size() == 0) {
+        if (in_data.size() == 0) {
             return make_error<usize>(Error::Empty);
         } else if (not desc_is_valid(desc)) {
             return make_error<usize>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
             return make_error<usize>(Error::TooBig);
-        } else if (data.size() != bytes_count) {
+        } else if (in_data.size() != bytes_count) {
             return make_error<usize>(Error::MismatchedDesc);
         }
 
-        auto writer = impl::FuncByteWriter{ out };
-        auto reader = impl::SimplePixelReader{ data, channels };
+        auto writer = impl::FuncByteWriter{ out_func };
+        auto reader = impl::SimplePixelReader{ in_data, channels };
 
         // TODO: allow function interruption and handle interruption
         return impl::encode(writer, reader, width, height, channels, colorspace).value();
     }
 
-    Result<usize> encode_into(ByteSinkFun out, PixelGenFun in, Desc desc)
+    Result<usize> encode_into(ByteSinkFun out_func, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
@@ -780,51 +780,85 @@ namespace qoipp
             return make_error<usize>(Error::TooBig);
         }
 
-        auto writer = impl::FuncByteWriter{ out };
-        auto reader = impl::FuncPixelReader{ in, channels };
+        auto writer = impl::FuncByteWriter{ out_func };
+        auto reader = impl::FuncPixelReader{ in_func, channels };
 
         // TODO: allow function and handle interruption
         return impl::encode(writer, reader, width, height, channels, colorspace).value();
     }
 
-    Result<void> encode_to_file(const fs::path& path, CSpan data, Desc desc, bool overwrite) noexcept
+    Result<usize> encode_into(const fs::path& out_path, CSpan in_data, Desc desc, bool overwrite) noexcept
     {
-        if (fs::exists(path) and not overwrite) {
-            return make_error<void>(Error::FileExists);
-        } else if (fs::exists(path) and not fs::is_regular_file(path)) {
-            return make_error<void>(Error::NotRegularFile);
+        if (fs::exists(out_path) and not overwrite) {
+            return make_error<usize>(Error::FileExists);
+        } else if (fs::exists(out_path) and not fs::is_regular_file(out_path)) {
+            return make_error<usize>(Error::NotRegularFile);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<void>(Error::TooBig);
+            return make_error<usize>(Error::TooBig);
         }
 
-        auto encoded = encode(data, desc);
+        auto encoded = encode(in_data, desc);
         if (not encoded) {
-            return make_error<void>(encoded.error());
+            return make_error<usize>(encoded.error());
         }
 
-        auto file = std::ofstream{ path, std::ios::binary | std::ios::trunc };
+        auto file = std::ofstream{ out_path, std::ios::binary | std::ios::trunc };
         if (not file.is_open()) {
-            return make_error<void>(Error::IoError);
+            return make_error<usize>(Error::IoError);
         }
 
         const auto size = static_cast<std::streamsize>(encoded->size());
         file.write(reinterpret_cast<const char*>(encoded->data()), size);
         if (not file) {
-            return make_error<void>(Error::IoError);
+            return make_error<usize>(Error::IoError);
         }
 
-        return {};
+        return encoded->size();
     }
 
-    Result<Image> decode(CSpan data, std::optional<Channels> target, bool flip_vertically) noexcept
+    Result<usize> encode_into(
+        const fs::path& out_path,
+        PixelGenFun     in_func,
+        Desc            desc,
+        bool            overwrite
+    ) noexcept
     {
-        if (data.size() == 0) {
+        if (fs::exists(out_path) and not overwrite) {
+            return make_error<usize>(Error::FileExists);
+        } else if (fs::exists(out_path) and not fs::is_regular_file(out_path)) {
+            return make_error<usize>(Error::NotRegularFile);
+        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(Error::TooBig);
+        }
+
+        auto encoded = encode(in_func, desc);
+        if (not encoded) {
+            return make_error<usize>(encoded.error());
+        }
+
+        auto file = std::ofstream{ out_path, std::ios::binary | std::ios::trunc };
+        if (not file.is_open()) {
+            return make_error<usize>(Error::IoError);
+        }
+
+        const auto size = static_cast<std::streamsize>(encoded->size());
+        file.write(reinterpret_cast<const char*>(encoded->data()), size);
+        if (not file) {
+            return make_error<usize>(Error::IoError);
+        }
+
+        return encoded->size();
+    }
+
+    Result<Image> decode(CSpan in_data, std::optional<Channels> target, bool flip_vertically) noexcept
+    {
+        if (in_data.size() == 0) {
             return make_error<Image>(Error::Empty);
-        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
+        } else if (in_data.size() <= constants::header_size + constants::end_marker.size()) {
             return make_error<Image>(Error::TooShort);
         }
 
-        auto header = read_header(data);
+        auto header = read_header(in_data);
         if (not header.has_value()) {
             return make_error<Image>(header.error());
         }
@@ -850,7 +884,7 @@ namespace qoipp
 
         auto writer = impl::SimplePixelWriter<false>{ result, dest };
 
-        impl::decode(writer, data, src, width, height);
+        impl::decode(writer, in_data, src, width, height);
 
         if (flip_vertically) {
             const auto linesize = width * static_cast<usize>(dest);
@@ -867,82 +901,19 @@ namespace qoipp
         };
     }
 
-    Result<Desc> decode_into(Span out, CSpan data, std::optional<Channels> target, bool flip_vertically)
-    {
-        if (data.size() == 0) {
-            return make_error<Desc>(Error::Empty);
-        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
-            return make_error<Desc>(Error::TooShort);
-        }
-
-        auto header = read_header(data);
-        if (not header.has_value()) {
-            return make_error<Desc>(header.error());
-        }
-
-        auto& [width, height, channels, colorspace] = header.value();
-
-        const auto src  = channels;
-        const auto dest = target.value_or(channels);
-
-        if (const auto bytes_count = count_bytes(header.value()); not bytes_count) {
-            return make_error<Desc>(Error::TooBig);
-        } else if (out.size() < bytes_count) {
-            return make_error<Desc>(Error::NotEnoughSpace);
-        }
-
-        channels = dest;
-
-        auto writer = impl::SimplePixelWriter<true>{ out, dest };
-
-        impl::decode(writer, data, src, width, height);
-
-        if (flip_vertically) {
-            const auto linesize = width * static_cast<usize>(dest);
-            for (usize y = 0; y < height / 2; ++y) {
-                auto* line1 = out.data() + y * linesize;
-                auto* line2 = out.data() + (height - y - 1) * linesize;
-                std::swap_ranges(line1, line1 + linesize, line2);
-            }
-        }
-
-        return std::move(header).value();
-    }
-
-    Result<Desc> decode_into(PixelSinkFun out, CSpan data)
-    {
-        if (data.size() == 0) {
-            return make_error<Desc>(Error::Empty);
-        } else if (data.size() <= constants::header_size + constants::end_marker.size()) {
-            return make_error<Desc>(Error::TooShort);
-        }
-
-        auto header = read_header(data);
-        if (not header.has_value()) {
-            return make_error<Desc>(header.error());
-        }
-
-        auto& [width, height, channels, colorspace] = header.value();
-
-        auto writer = impl::FuncPixelWriter{ out };
-        impl::decode(writer, data, channels, width, height);
-
-        return std::move(header).value();
-    }
-
-    Result<Image> decode_from_file(
-        const fs::path&         path,
+    Result<Image> decode(
+        const fs::path&         in_path,
         std::optional<Channels> target,
         bool                    flip_vertically
     ) noexcept
     {
-        if (not fs::exists(path)) {
+        if (not fs::exists(in_path)) {
             return make_error<Image>(Error::FileNotExists);
-        } else if (not fs::is_regular_file(path)) {
+        } else if (not fs::is_regular_file(in_path)) {
             return make_error<Image>(Error::NotRegularFile);
         }
 
-        auto file = std::ifstream{ path, std::ios::binary };
+        auto file = std::ifstream{ in_path, std::ios::binary };
         if (not file.is_open()) {
             return make_error<Image>(Error::IoError);
         }
@@ -956,5 +927,126 @@ namespace qoipp
         auto view = sstream.view();
         auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode(span, target, flip_vertically);
+    }
+
+    Result<Desc> decode_into(
+        Span                    out_buf,
+        CSpan                   in_data,
+        std::optional<Channels> target,
+        bool                    flip_vertically
+    )
+    {
+        if (in_data.size() == 0) {
+            return make_error<Desc>(Error::Empty);
+        } else if (in_data.size() <= constants::header_size + constants::end_marker.size()) {
+            return make_error<Desc>(Error::TooShort);
+        }
+
+        auto header = read_header(in_data);
+        if (not header.has_value()) {
+            return make_error<Desc>(header.error());
+        }
+
+        auto& [width, height, channels, colorspace] = header.value();
+
+        const auto src  = channels;
+        const auto dest = target.value_or(channels);
+
+        if (const auto bytes_count = count_bytes(header.value()); not bytes_count) {
+            return make_error<Desc>(Error::TooBig);
+        } else if (out_buf.size() < bytes_count) {
+            return make_error<Desc>(Error::NotEnoughSpace);
+        }
+
+        channels = dest;
+
+        auto writer = impl::SimplePixelWriter<true>{ out_buf, dest };
+
+        impl::decode(writer, in_data, src, width, height);
+
+        if (flip_vertically) {
+            const auto linesize = width * static_cast<usize>(dest);
+            for (usize y = 0; y < height / 2; ++y) {
+                auto* line1 = out_buf.data() + y * linesize;
+                auto* line2 = out_buf.data() + (height - y - 1) * linesize;
+                std::swap_ranges(line1, line1 + linesize, line2);
+            }
+        }
+
+        return std::move(header).value();
+    }
+
+    Result<Desc> decode_into(PixelSinkFun out_func, CSpan in_data)
+    {
+        if (in_data.size() == 0) {
+            return make_error<Desc>(Error::Empty);
+        } else if (in_data.size() <= constants::header_size + constants::end_marker.size()) {
+            return make_error<Desc>(Error::TooShort);
+        }
+
+        auto header = read_header(in_data);
+        if (not header.has_value()) {
+            return make_error<Desc>(header.error());
+        }
+
+        auto& [width, height, channels, colorspace] = header.value();
+
+        auto writer = impl::FuncPixelWriter{ out_func };
+        impl::decode(writer, in_data, channels, width, height);
+
+        return std::move(header).value();
+    }
+
+    Result<Desc> decode_into(
+        Span                    out_buf,
+        const fs::path&         in_path,
+        std::optional<Channels> target,
+        bool                    flip_vertically
+    ) noexcept
+    {
+        if (not fs::exists(in_path)) {
+            return make_error<Desc>(Error::FileNotExists);
+        } else if (not fs::is_regular_file(in_path)) {
+            return make_error<Desc>(Error::NotRegularFile);
+        }
+
+        auto file = std::ifstream{ in_path, std::ios::binary };
+        if (not file.is_open()) {
+            return make_error<Desc>(Error::IoError);
+        }
+
+        auto sstream = std::stringstream{};
+        sstream << file.rdbuf();
+        if (not file) {
+            return make_error<Desc>(Error::IoError);
+        }
+
+        auto view = sstream.view();
+        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        return decode_into(out_buf, span, target, flip_vertically);
+    }
+
+    Result<Desc> decode_into(PixelSinkFun out_func, const fs::path& in_path) noexcept
+    {
+        if (not fs::exists(in_path)) {
+            return make_error<Desc>(Error::FileNotExists);
+        } else if (not fs::is_regular_file(in_path)) {
+            return make_error<Desc>(Error::NotRegularFile);
+        }
+
+        auto file = std::ifstream{ in_path, std::ios::binary };
+        if (not file.is_open()) {
+            return make_error<Desc>(Error::IoError);
+        }
+
+        auto sstream = std::stringstream{};
+        sstream << file.rdbuf();
+        if (not file) {
+            return make_error<Desc>(Error::IoError);
+        }
+
+        auto view = sstream.view();
+        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        return decode_into(out_func, span);
     }
 }
