@@ -454,16 +454,16 @@ int main()
         auto qoifile = mktemp();
 
         expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw, desc, false);
+            const auto res = qoipp::encode_into(qoifile, raw, desc, false);
             expect(res.has_value());
         }));
         expect(ut::nothrow([&] {
-            const auto res = qoipp::encode_to_file(qoifile, raw, desc, false);
+            const auto res = qoipp::encode_into(qoifile, raw, desc, false);
             expect(not res.has_value() and res.error() == qoipp::Error::FileExists);
         }));
 
         qoipp::Image decoded;
-        expect(ut::nothrow([&] { decoded = qoipp::decode_from_file(qoifile).value(); }));
+        expect(ut::nothrow([&] { decoded = qoipp::decode(qoifile).value(); }));
         expect(decoded.desc == desc);
         expect(that % decoded.data.size() == raw.size());
         expect(rr::equal(decoded.data, raw)) << compare(raw, decoded.data);
@@ -472,14 +472,14 @@ int main()
         expect(fs::is_empty(qoifile));
 
         expect(ut::nothrow([&] {
-            const auto res = qoipp::decode_from_file(qoifile);
+            const auto res = qoipp::decode(qoifile);
             expect(not res.has_value() and res.error() == qoipp::Error::Empty);
         })) << "Empty file should error with qoipp::Error::Empty";
 
         fs::remove(qoifile);
 
         expect(ut::nothrow([&] {
-            const auto res = qoipp::decode_from_file(qoifile);
+            const auto res = qoipp::decode(qoifile);
             expect(not res.has_value() and res.error() == qoipp::Error::FileNotExists);
         })) << "Non-existent file should error with qoipp::Error::FileNotExists";
 
@@ -505,7 +505,7 @@ int main()
         const auto& [desc, raw, qoi, _] = input;
 
         const auto qoifile = mktemp();
-        expect(ut::nothrow([&] { qoipp::encode_to_file(qoifile, raw, desc, false); }));
+        expect(ut::nothrow([&] { qoipp::encode_into(qoifile, raw, desc, false); }));
 
         const auto header = qoipp::read_header(qoifile);
         expect(header.has_value()) << "Invalid header";
@@ -562,7 +562,7 @@ int main()
                 auto qoi_image = read_file(entry.path());
 
                 const auto [raw_image_ref, desc_ref] = qoi_decode(qoi_image);
-                const auto [raw_image, desc]         = qoipp::decode_from_file(entry.path()).value();
+                const auto [raw_image, desc]         = qoipp::decode(entry.path()).value();
 
                 expect(that % raw_image_ref.size() == raw_image.size());
                 expect(desc_ref == desc);
