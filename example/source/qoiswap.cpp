@@ -33,6 +33,7 @@ int main(int argc, char** argv)
 
     auto maybeHeader = qoipp::read_header(input);
     if (not maybeHeader) {
+        fmt::println(stderr, "{}", to_string(maybeHeader.error()));
         fmt::println(stderr, "File is not a qoi image");
         return 1;
     }
@@ -57,7 +58,7 @@ int main(int argc, char** argv)
         }
     };
 
-    auto image = qoipp::decode_from_file(input);
+    auto image = qoipp::decode(input);
     if (not image) {
         fmt::println(stderr, "failed to decode qoi file {}: {}", input, to_string(image.error()));
         return 1;
