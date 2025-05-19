@@ -1,4 +1,4 @@
-#include <qoipp.hpp>
+#include <qoipp/qoipp.hpp>
 #define QOI_IMPLEMENTATION
 #include <qoi.h>
 

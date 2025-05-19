@@ -1,4 +1,4 @@
-#include <qoipp.hpp>
+#include <qoipp/qoipp.hpp>
 
 #include <CLI/App.hpp>
 #include <CLI/CLI.hpp>
