@@ -1,5 +1,5 @@
-#ifndef QOIPP_HPP_O4A387W5ER6OW7E
-#define QOIPP_HPP_O4A387W5ER6OW7E
+#ifndef QOIPP_SIMPLE_HPP_GO84ERGTVF6
+#define QOIPP_SIMPLE_HPP_GO84ERGTVF6
 
 #include "qoipp/common.hpp"
 
@@ -334,4 +334,4 @@ namespace qoipp
     Result<Desc> decode_into(PixelSinkFun out_func, const std::filesystem::path& in_path) noexcept;
 }
 
-#endif /* end of include guard: QOIPP_HPP_O4A387W5ER6OW7E */
+#endif

@@ -1,3 +1,6 @@
+#ifndef QOIPP_COMMON_HPP_AW4EODSHFJ4U
+#define QOIPP_COMMON_HPP_AW4EODSHFJ4U
+
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -202,3 +205,5 @@ namespace qoipp
         }
     }
 }
+
+#endif

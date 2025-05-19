@@ -3,7 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <PerlinNoise.hpp>
 #include <fmt/core.h>
-#include <qoipp/qoipp.hpp>
+#include <qoipp/simple.hpp>
 #include <range/v3/algorithm.hpp>
 #include <range/v3/view.hpp>
 
