@@ -1,4 +1,4 @@
-#include <qoipp/qoipp.hpp>
+#include <qoipp/simple.hpp>
 #define QOI_IMPLEMENTATION
 #include <fpng.h>
 #include <qoi.h>

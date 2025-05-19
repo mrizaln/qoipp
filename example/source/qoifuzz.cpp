@@ -1,4 +1,4 @@
-#include <qoipp/qoipp.hpp>
+#include <qoipp/simple.hpp>
 
 #include <cstring>
 
