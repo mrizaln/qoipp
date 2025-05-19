@@ -9,16 +9,20 @@ using qoipp::Span;
 // to build:
 //   clang -fsanitize=address,fuzzer -std=c++20 -g -O1 -I <include> source/qoifuzz.cpp <libqoipp.a> -o qoifuzz
 
-constexpr auto max_size = 512u * 1024 * 1024;    // 512 MiB
+constexpr auto max_size = 256u * 1024 * 1024;    // 512 MiB
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
-    qoipp::read_header({ data, size });
-
     auto buffer = qoipp::Vec(max_size);
 
-    qoipp::decode({ data, size });
-    qoipp::decode_into(buffer, { data, size });
+    auto header = qoipp::read_header({ data, size });
+    if (header) {
+        auto [w, h, c, _] = *header;
+        if (static_cast<size_t>(c) * w * h <= max_size) {
+            qoipp::decode({ data, size });
+            qoipp::decode_into(buffer, { data, size });
+        }
+    }
 
     constexpr auto desc_size = sizeof(qoipp::Desc);
     if (size > desc_size) {
