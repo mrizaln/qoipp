@@ -2,8 +2,6 @@
 
 #include <cstring>
 
-using qoipp::Span;
-
 // TODO: fuzz encode function too
 
 // to build:
@@ -13,7 +11,7 @@ constexpr auto max_size = 256u * 1024 * 1024;    // 512 MiB
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
-    auto buffer = qoipp::Vec(max_size);
+    auto buffer = qoipp::ByteVec(max_size);
 
     auto header = qoipp::read_header({ data, size });
     if (header) {
@@ -36,7 +34,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             return 0;
         }
 
-        auto data_span = qoipp::CSpan{ data + desc_size, size - desc_size };
+        auto data_span = qoipp::ByteCSpan{ data + desc_size, size - desc_size };
 
         qoipp::encode(data_span, desc);
         qoipp::encode_into(buffer, data_span, desc);

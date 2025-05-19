@@ -69,20 +69,20 @@ namespace lib
 
 struct RawImage
 {
-    qoipp::Vec  data;
-    qoipp::Desc desc;
+    qoipp::ByteVec data;
+    qoipp::Desc    desc;
 };
 
 struct QoiImage
 {
-    qoipp::Vec  data;
-    qoipp::Desc desc;
+    qoipp::ByteVec data;
+    qoipp::Desc    desc;
 };
 
 struct PngImage
 {
-    qoipp::Vec  data;
-    qoipp::Desc desc;
+    qoipp::ByteVec data;
+    qoipp::Desc    desc;
 };
 
 template <typename Image = QoiImage>
@@ -415,7 +415,7 @@ DecodeResult qoi_decode_wrapper(const QoiImage& image)
 
 EncodeResult<> qoixx_encode(const RawImage& image)
 {
-    using T = qoipp::Vec;
+    using T = qoipp::ByteVec;
 
     auto desc = qoixx::qoi::desc{
         .width      = image.desc.width,
@@ -436,7 +436,7 @@ EncodeResult<> qoixx_encode(const RawImage& image)
 
 EncodeResult<> qoixx_decode(const QoiImage& image)
 {
-    using T = qoipp::Vec;
+    using T = qoipp::ByteVec;
 
     auto timepoint       = Clock::now();
     auto [encoded, desc] = qoixx::qoi::decode<T>(image.data);
@@ -461,7 +461,7 @@ EncodeResult<> qoipp_encode(const RawImage& image)
 
     auto desc   = image.desc;
     auto worst  = desc.width * desc.height * (static_cast<std::size_t>(desc.channels) + 1) + 14 + 8;
-    auto buffer = qoipp::Vec(worst);
+    auto buffer = qoipp::ByteVec(worst);
     auto count  = qoipp::encode_into(buffer, image.data, image.desc).value();
     buffer.resize(count);
 

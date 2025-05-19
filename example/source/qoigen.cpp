@@ -17,8 +17,8 @@
 namespace rv = ranges::views;
 namespace fs = std::filesystem;
 
+using qoipp::ByteVec;
 using qoipp::Channels;
-using qoipp::Vec;
 
 template <typename T>
 using Pair = std::pair<T, T>;
@@ -70,12 +70,12 @@ public:
         fmt::println("");
     }
 
-    Vec generate(unsigned int width, unsigned int height)
+    ByteVec generate(unsigned int width, unsigned int height)
     {
         const auto pixel_size = width * height;
         const auto channels   = static_cast<std::size_t>(m_channels);
 
-        auto result = Vec{};
+        auto result = ByteVec{};
         result.reserve(pixel_size * channels);
 
         auto x_bias = std::vector<float>(channels);

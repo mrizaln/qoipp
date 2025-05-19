@@ -23,10 +23,10 @@
 
 namespace fs = std::filesystem;
 
-using qoipp::CSpan;
+using qoipp::ByteCSpan;
+using qoipp::ByteVec;
 using qoipp::Desc;
 using qoipp::Image;
-using qoipp::Vec;
 
 struct StbImage
 {
@@ -47,9 +47,9 @@ struct ImageVar
         using Ts::operator()...;
     };
 
-    std::pair<CSpan, Desc> get() const
+    std::pair<ByteCSpan, Desc> get() const
     {
-        const auto tup = std::make_pair<CSpan, const Desc&>;
+        const auto tup = std::make_pair<ByteCSpan, const Desc&>;
         return std::visit(
             Overloaded{
                 [&](const Image& d) { return tup(d.data, d.desc); },
@@ -83,7 +83,7 @@ enum class FileType
     QOI
 };
 
-Vec load_file(const fs::path& filepath)
+ByteVec load_file(const fs::path& filepath)
 {
     auto file = std::ifstream{ filepath, std::ios::binary };
     if (!file) {
@@ -91,7 +91,7 @@ Vec load_file(const fs::path& filepath)
     }
 
     const auto size  = fs::file_size(filepath);
-    auto       bytes = Vec(size);
+    auto       bytes = ByteVec(size);
 
     DO_TIME_MS ("Read from file") {
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));

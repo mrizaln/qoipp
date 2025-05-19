@@ -46,8 +46,8 @@ using isize = std::ptrdiff_t;
 using f32 = float;
 using f64 = double;
 
-using qoipp::CSpan;
-using qoipp::Vec;
+using qoipp::ByteCSpan;
+using qoipp::ByteVec;
 
 namespace fs = std::filesystem;
 namespace ut = boost::ut;
@@ -63,22 +63,22 @@ fs::path mktemp()
     return fs::temp_directory_path() / name;
 }
 
-Vec read_file(const fs::path& path)
+ByteVec read_file(const fs::path& path)
 {
     auto file = std::ifstream{ path, std::ios::binary };
     file.exceptions(std::ios::failbit | std::ios::badbit);
-    auto data = Vec(fs::file_size(path));
+    auto data = ByteVec(fs::file_size(path));
     file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
     return data;
 }
 
-Vec to_rgb(CSpan data)
+ByteVec to_rgb(ByteCSpan data)
 {
     if (data.size() % 4) {
         throw std::invalid_argument("data size must be a multiple of 4");
     }
 
-    auto result = Vec{};
+    auto result = ByteVec{};
     result.reserve(data.size() / 4 * 3);
 
     for (auto chunk : rv::chunk(data, 4)) {
@@ -88,13 +88,13 @@ Vec to_rgb(CSpan data)
     return result;
 }
 
-Vec to_rgba(CSpan data)
+ByteVec to_rgba(ByteCSpan data)
 {
     if (data.size() % 3) {
         throw std::invalid_argument("data size must be a multiple of 3");
     }
 
-    auto result = Vec{};
+    auto result = ByteVec{};
     result.reserve(data.size() / 3 * 4);
 
     for (auto chunk : rv::chunk(data, 3)) {
@@ -147,7 +147,7 @@ Image qoi_encode(const Image& image)
     auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
 
     auto result = Image{
-        .data = Vec{ byte_ptr, byte_ptr + len },
+        .data = ByteVec{ byte_ptr, byte_ptr + len },
         .desc = image.desc,
     };
 
@@ -155,7 +155,7 @@ Image qoi_encode(const Image& image)
     return result;
 }
 
-Image qoi_decode(const CSpan image)
+Image qoi_decode(const ByteCSpan image)
 {
     qoi_desc desc;
     auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
@@ -181,16 +181,16 @@ Image qoi_decode(const CSpan image)
     return result;
 }
 
-std::string compare(CSpan lhs, CSpan rhs)
+std::string compare(ByteCSpan lhs, ByteCSpan rhs)
 {
     constexpr auto chunk = 32;
 
-    auto to_span = [](auto&& r) { return CSpan{ r.begin(), r.end() }; };
+    auto to_span = [](auto&& r) { return ByteCSpan{ r.begin(), r.end() }; };
 
     auto lhs_chunked = lhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
     auto rhs_chunked = rhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
 
-    auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs_chunked, rhs_chunked, [](CSpan l, CSpan r) {
+    auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs_chunked, rhs_chunked, [](ByteCSpan l, ByteCSpan r) {
         auto lz = l.size();
         auto rz = r.size();
         return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
@@ -246,15 +246,15 @@ int main()
         .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const auto raw_image_3 = Vec{
+    const auto raw_image_3 = ByteVec{
 #include "image_raw_3.txt"
     };
 
-    const auto qoi_image_3 = Vec{
+    const auto qoi_image_3 = ByteVec{
 #include "image_qoi_3.txt"
     };
 
-    const auto qoi_image_incomplete_3 = Vec{
+    const auto qoi_image_incomplete_3 = ByteVec{
 #include "image_qoi_3_incomplete.txt"
     };
 
@@ -270,15 +270,15 @@ int main()
         .colorspace = qoipp::Colorspace::sRGB,
     };
 
-    const auto raw_image_4 = Vec{
+    const auto raw_image_4 = ByteVec{
 #include "image_raw_4.txt"
     };
 
-    const auto qoi_image_4 = Vec{
+    const auto qoi_image_4 = ByteVec{
 #include "image_qoi_4.txt"
     };
 
-    const auto qoi_image_incomplete_4 = Vec{
+    const auto qoi_image_incomplete_4 = ByteVec{
 #include "image_qoi_4_incomplete.txt"
     };
 
@@ -300,16 +300,16 @@ int main()
 
         "with sufficient buffer"_test = [&] {
             auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
-            auto buffer  = Vec(worst);
+            auto buffer  = ByteVec(worst);
             auto count   = qoipp::encode_into(buffer, raw, desc).value();
-            auto encoded = CSpan{ buffer.begin(), count };
+            auto encoded = ByteCSpan{ buffer.begin(), count };
 
             expect(that % encoded.size() == qoi.size());
             expect(rr::equal(encoded, qoi));
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = Vec(1011);
+            auto buffer = ByteVec(1011);
             auto res    = qoipp::encode_into(buffer, raw, desc);
 
             expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
@@ -332,16 +332,16 @@ int main()
 
         "with sufficient buffer"_test = [&] {
             auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
-            auto buffer  = Vec(worst);
+            auto buffer  = ByteVec(worst);
             auto count   = qoipp::encode_into(buffer, gen, desc).value();
-            auto encoded = CSpan{ buffer.begin(), count };
+            auto encoded = ByteCSpan{ buffer.begin(), count };
 
             expect(that % encoded.size() == qoi.size());
             expect(rr::equal(encoded, qoi));
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = Vec(1011);
+            auto buffer = ByteVec(1011);
             auto res    = qoipp::encode_into(buffer, gen, desc);
 
             expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
@@ -352,7 +352,7 @@ int main()
     "image encode into function from span"_test = [&](auto&& input) {
         const auto& [desc, raw, qoi, _] = input;
 
-        auto result = qoipp::Vec{};
+        auto result = qoipp::ByteVec{};
         auto out    = [&](u8 byte) { result.push_back(byte); };
         auto res    = qoipp::encode_into(out, raw, desc).value();
 
@@ -374,7 +374,7 @@ int main()
             };
         };
 
-        auto result = qoipp::Vec{};
+        auto result = qoipp::ByteVec{};
         auto out    = [&](u8 byte) { result.push_back(byte); };
         auto res    = qoipp::encode_into(out, gen, desc).value();
 
@@ -420,9 +420,9 @@ int main()
         const auto& [desc, raw, qoi, _] = input;
 
         auto size       = desc.width * desc.height * static_cast<usize>(desc.channels);
-        auto buffer     = Vec(size);
+        auto buffer     = ByteVec(size);
         auto actualdesc = qoipp::decode_into(buffer, qoi).value();
-        auto decoded    = CSpan{ buffer.begin(), size };
+        auto decoded    = ByteCSpan{ buffer.begin(), size };
 
         expect(actualdesc == desc);
         expect(that % decoded.size() == raw.size());
@@ -432,7 +432,7 @@ int main()
     "image decode into function"_test = [&](auto&& input) {
         const auto& [desc, raw, qoi, _] = input;
 
-        auto result = qoipp::Vec{};
+        auto result = qoipp::ByteVec{};
         auto out    = [&](qoipp::Pixel pixel) {
             auto arr = std::bit_cast<std::array<u8, 4>>(pixel);
             if (desc.channels == qoipp::Channels::RGBA) {
@@ -493,10 +493,10 @@ int main()
         expect(header.has_value()) << "Invalid header";
         expect(*header == desc);
 
-        const auto empty_header = qoipp::read_header(Vec{});
+        const auto empty_header = qoipp::read_header(ByteVec{});
         expect(!empty_header.has_value());
 
-        const auto invalid_header_str = Vec{ 0x00, 0x01, 0x02, 0x03 };
+        const auto invalid_header_str = ByteVec{ 0x00, 0x01, 0x02, 0x03 };
         const auto invalid_header     = qoipp::read_header(invalid_header_str);
         expect(!invalid_header.has_value());
     } | simple_cases;

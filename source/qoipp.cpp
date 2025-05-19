@@ -278,8 +278,8 @@ namespace qoipp::impl
     {
         static constexpr bool is_checked = Checked;
 
-        Span dest;
-        bool out_of_bound = false;
+        ByteSpan dest;
+        bool     out_of_bound = false;
 
         void write(usize index, u8 byte)
         {
@@ -313,7 +313,7 @@ namespace qoipp::impl
     {
         static constexpr bool is_checked = Checked;
 
-        Span     dest;
+        ByteSpan dest;
         Channels channels;
         bool     out_of_bound = false;
 
@@ -352,8 +352,8 @@ namespace qoipp::impl
 
     struct SimplePixelReader
     {
-        CSpan    data;
-        Channels channels;
+        ByteCSpan data;
+        Channels  channels;
 
         Pixel read(usize index) const noexcept
         {
@@ -474,7 +474,7 @@ namespace qoipp::impl
     }
 
     template <PixelWriter Out>
-    void decode(Out out, CSpan in, Channels channels, usize width, usize height) noexcept(false)
+    void decode(Out out, ByteCSpan in, Channels channels, usize width, usize height) noexcept(false)
     {
         auto seen_pixels = RunningArray{};
         auto prev_pixel  = constants::start;
@@ -583,7 +583,7 @@ namespace qoipp
         return "Unknown";
     }
 
-    Result<Desc> read_header(CSpan in_data) noexcept
+    Result<Desc> read_header(ByteCSpan in_data) noexcept
     {
         if (in_data.size() == 0) {
             return make_error<Desc>(Error::Empty);
@@ -644,29 +644,29 @@ namespace qoipp
         return read_header(data);
     }
 
-    Result<Vec> encode(CSpan in_data, Desc desc) noexcept
+    Result<ByteVec> encode(ByteCSpan in_data, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
 
         if (in_data.size() == 0) {
-            return make_error<Vec>(Error::Empty);
+            return make_error<ByteVec>(Error::Empty);
         } else if (not desc_is_valid(desc)) {
-            return make_error<Vec>(Error::InvalidDesc);
+            return make_error<ByteVec>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<Vec>(Error::TooBig);
+            return make_error<ByteVec>(Error::TooBig);
         } else if (in_data.size() != bytes_count) {
-            return make_error<Vec>(Error::MismatchedDesc);
+            return make_error<ByteVec>(Error::MismatchedDesc);
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
         const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // chanels + 1 tag
                               + constants::header_size + constants::end_marker.size();
 
-        auto result = Vec{};
+        auto result = ByteVec{};
         try {
-            result = Vec(worst_size);
+            result = ByteVec(worst_size);
         } catch (...) {
-            return make_error<Vec>(Error::BadAlloc);
+            return make_error<ByteVec>(Error::BadAlloc);
         }
 
         auto writer = impl::SimpleByteWriter<false>{ result };
@@ -678,24 +678,24 @@ namespace qoipp
         return result;
     }
 
-    Result<Vec> encode(PixelGenFun in_func, Desc desc) noexcept
+    Result<ByteVec> encode(PixelGenFun in_func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
-            return make_error<Vec>(Error::InvalidDesc);
+            return make_error<ByteVec>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<Vec>(Error::TooBig);
+            return make_error<ByteVec>(Error::TooBig);
         }
 
         // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
         const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // OP_RGBA
                               + constants::header_size + constants::end_marker.size();
 
-        auto result = Vec{};
+        auto result = ByteVec{};
         try {
-            result = Vec(worst_size);
+            result = ByteVec(worst_size);
         } catch (...) {
-            return make_error<Vec>(Error::BadAlloc);
+            return make_error<ByteVec>(Error::BadAlloc);
         }
 
         auto writer = impl::SimpleByteWriter<false>{ result };
@@ -707,7 +707,7 @@ namespace qoipp
         return result;
     }
 
-    Result<usize> encode_into(Span out_buf, CSpan in_data, Desc desc)
+    Result<usize> encode_into(ByteSpan out_buf, ByteCSpan in_data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
@@ -731,7 +731,7 @@ namespace qoipp
         return count.value();
     }
 
-    Result<usize> encode_into(Span out_buf, PixelGenFun in_func, Desc desc)
+    Result<usize> encode_into(ByteSpan out_buf, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
         if (not desc_is_valid(desc)) {
@@ -750,7 +750,7 @@ namespace qoipp
         return count.value();
     }
 
-    Result<usize> encode_into(ByteSinkFun out_func, CSpan in_data, Desc desc)
+    Result<usize> encode_into(ByteSinkFun out_func, ByteCSpan in_data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
@@ -787,7 +787,7 @@ namespace qoipp
         return impl::encode(writer, reader, width, height, channels, colorspace).value();
     }
 
-    Result<usize> encode_into(const fs::path& out_path, CSpan in_data, Desc desc, bool overwrite) noexcept
+    Result<usize> encode_into(const fs::path& out_path, ByteCSpan in_data, Desc desc, bool overwrite) noexcept
     {
         if (fs::exists(out_path) and not overwrite) {
             return make_error<usize>(Error::FileExists);
@@ -850,7 +850,7 @@ namespace qoipp
         return encoded->size();
     }
 
-    Result<Image> decode(CSpan in_data, std::optional<Channels> target, bool flip_vertically) noexcept
+    Result<Image> decode(ByteCSpan in_data, std::optional<Channels> target, bool flip_vertically) noexcept
     {
         if (in_data.size() == 0) {
             return make_error<Image>(Error::Empty);
@@ -875,9 +875,9 @@ namespace qoipp
             return make_error<Image>(Error::TooBig);
         }
 
-        auto result = Vec{};
+        auto result = ByteVec{};
         try {
-            result = Vec(*bytes_count);
+            result = ByteVec(*bytes_count);
         } catch (...) {
             return make_error<Image>(Error::BadAlloc);
         }
@@ -925,13 +925,13 @@ namespace qoipp
         }
 
         auto view = sstream.view();
-        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        auto span = ByteCSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode(span, target, flip_vertically);
     }
 
     Result<Desc> decode_into(
-        Span                    out_buf,
-        CSpan                   in_data,
+        ByteSpan                out_buf,
+        ByteCSpan               in_data,
         std::optional<Channels> target,
         bool                    flip_vertically
     )
@@ -976,7 +976,7 @@ namespace qoipp
         return std::move(header).value();
     }
 
-    Result<Desc> decode_into(PixelSinkFun out_func, CSpan in_data)
+    Result<Desc> decode_into(PixelSinkFun out_func, ByteCSpan in_data)
     {
         if (in_data.size() == 0) {
             return make_error<Desc>(Error::Empty);
@@ -998,7 +998,7 @@ namespace qoipp
     }
 
     Result<Desc> decode_into(
-        Span                    out_buf,
+        ByteSpan                out_buf,
         const fs::path&         in_path,
         std::optional<Channels> target,
         bool                    flip_vertically
@@ -1022,7 +1022,7 @@ namespace qoipp
         }
 
         auto view = sstream.view();
-        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        auto span = ByteCSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode_into(out_buf, span, target, flip_vertically);
     }
 
@@ -1046,7 +1046,7 @@ namespace qoipp
         }
 
         auto view = sstream.view();
-        auto span = CSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
+        auto span = ByteCSpan{ reinterpret_cast<const unsigned char*>(view.data()), view.size() };
         return decode_into(out_func, span);
     }
 }
