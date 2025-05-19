@@ -1,4 +1,4 @@
-#include <qoipp.hpp>
+#include <qoipp/qoipp.hpp>
 #define QOI_IMPLEMENTATION
 #include <fpng.h>
 #include <qoi.h>
@@ -458,11 +458,17 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
 EncodeResult<> qoipp_encode(const RawImage& image)
 {
     auto timepoint = Clock::now();
-    auto encoded   = qoipp::encode(image.data, image.desc).value();
-    auto duration  = Clock::now() - timepoint;
+
+    auto desc   = image.desc;
+    auto worst  = desc.width * desc.height * (static_cast<std::size_t>(desc.channels) + 1) + 14 + 8;
+    auto buffer = qoipp::Vec(worst);
+    auto count  = qoipp::encode_into(buffer, image.data, image.desc).value();
+    buffer.resize(count);
+
+    auto duration = Clock::now() - timepoint;
 
     return {
-        .image = { encoded, image.desc },
+        .image = { buffer, image.desc },
         .time  = duration,
     };
 }

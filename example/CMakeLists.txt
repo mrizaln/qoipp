@@ -66,7 +66,7 @@ create_executable(
     DEPS CLI11::CLI11 fmt::fmt qoipp
 )
 
-# run fuzz on clang only
+# build fuzz on clang only
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     create_executable(NAME qoifuzz DEPS qoipp)
     target_compile_options(qoifuzz PRIVATE -fsanitize=address,fuzzer)
