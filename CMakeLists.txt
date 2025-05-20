@@ -6,7 +6,7 @@ project(
   LANGUAGES CXX
   DESCRIPTION "QOI codec written in C++20")
 
-add_library(qoipp STATIC source/simple.cpp)
+add_library(qoipp STATIC source/simple.cpp source/stream.cpp)
 target_include_directories(qoipp PUBLIC include)
 target_compile_features(qoipp PUBLIC cxx_std_20)
 set_target_properties(qoipp PROPERTIES CXX_EXTENSIONS OFF)
