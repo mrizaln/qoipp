@@ -25,6 +25,7 @@ namespace qoipp
 
     /**
      * @brief Read the header of a QOI image from a file.
+     *
      * @param in_path The path to the file.
      * @return The description of the image (std::nullopt if it's invalid).
      *

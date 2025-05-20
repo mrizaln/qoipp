@@ -2,134 +2,17 @@
 
 #include "util.hpp"
 
-#include <cstring>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <type_traits>
 #include <utility>
 
 namespace qoipp::impl
 {
     using RunningArray = std::array<Pixel, constants::running_array_size>;
 
-    template <bool Checked>
-    struct SimpleByteWriter
-    {
-        static constexpr bool is_checked = Checked;
-
-        ByteSpan dest;
-        bool     out_of_bound = false;
-
-        void write(usize index, u8 byte)
-        {
-            if constexpr (Checked) {
-                if (index >= dest.size()) {
-                    out_of_bound = true;
-                    return;
-                }
-            }
-            dest[index] = byte;
-        }
-
-        bool ok() const { return not out_of_bound; }
-    };
-    static_assert(ByteWriter<SimpleByteWriter<false>>);
-    static_assert(ByteWriter<SimpleByteWriter<true>>);
-
-    struct FuncByteWriter
-    {
-        static constexpr bool is_checked = false;
-
-        ByteSinkFun func;
-
-        void write([[maybe_unused]] usize index, u8 byte) noexcept { func(byte); }
-        bool ok() const { return true; }
-    };
-    static_assert(ByteWriter<FuncByteWriter>);
-
-    template <bool Checked>
-    struct SimplePixelWriter
-    {
-        static constexpr bool is_checked = Checked;
-
-        ByteSpan dest;
-        Channels channels;
-        bool     out_of_bound = false;
-
-        void write(usize index, const Pixel& pixel) noexcept
-        {
-            const auto offset = index * static_cast<usize>(channels);
-            if constexpr (Checked) {
-                if (offset >= dest.size()) {
-                    out_of_bound = true;
-                    return;
-                }
-            }
-
-            if (channels == Channels::RGBA) {
-                std::memcpy(dest.data() + offset, &pixel, 4);
-            } else {
-                std::memcpy(dest.data() + offset, &pixel, 3);
-            }
-        }
-
-        bool ok() const { return not out_of_bound; }
-    };
-    static_assert(PixelWriter<SimplePixelWriter<false>>);
-    static_assert(PixelWriter<SimplePixelWriter<true>>);
-
-    struct FuncPixelWriter
-    {
-        static constexpr bool is_checked = false;
-
-        PixelSinkFun func;
-
-        void write([[maybe_unused]] usize index, const Pixel& pixel) noexcept { func(pixel); }
-        bool ok() const { return true; }
-    };
-    static_assert(PixelWriter<FuncPixelWriter>);
-
-    struct SimplePixelReader
-    {
-        ByteCSpan data;
-        Channels  channels;
-
-        Pixel read(usize index) const noexcept
-        {
-            const auto offset = index * static_cast<usize>(channels);
-            if (channels == Channels::RGBA) {
-                return { data[offset + 0], data[offset + 1], data[offset + 2], data[offset + 3] };
-            } else {
-                return { data[offset + 0], data[offset + 1], data[offset + 2], 0xFF };
-            }
-        }
-    };
-    static_assert(PixelReader<SimplePixelReader>);
-
-    struct FuncPixelReader
-    {
-        PixelGenFun func;
-        Channels    channels;
-
-        Pixel read(usize index) const noexcept
-        {
-            auto pixel = func(index);
-            if (channels == Channels::RGB) {
-                pixel.a = 0xFF;
-            }
-            return pixel;
-        }
-    };
-    static_assert(PixelReader<FuncPixelReader>);
-
-    inline usize hash(const Pixel& pixel)
-    {
-        const auto& [r, g, b, a] = pixel;
-        return (r * 3 + g * 5 + b * 7 + a * 11);
-    }
-
     // TODO: maybe add the unchecked template parameter here instead of on SimpleByteWriter
-    template <PixelReader In, ByteWriter Out>
+    template <bool Checked, util::PixelReader In, util::ByteWriter Out>
     std::optional<usize> encode(
         Out        out,
         In         in,
@@ -139,7 +22,7 @@ namespace qoipp::impl
         Colorspace colorspace
     ) noexcept
     {
-        auto chunks      = op::ChunkArray{ out };    // the encoded data goes here
+        auto chunks      = util::ChunkArray<Out, Checked>{ out };    // the encoded data goes here
         auto seen_pixels = RunningArray{};
 
         chunks.write_header(width, height, channels, colorspace);
@@ -163,7 +46,7 @@ namespace qoipp::impl
                     run = 0;
                 }
 
-                const u8 index = hash(curr_pixel) % constants::running_array_size;
+                const u8 index = util::hash(curr_pixel) % constants::running_array_size;
 
                 // OP_INDEX
                 if (seen_pixels[index] == curr_pixel) {
@@ -185,9 +68,9 @@ namespace qoipp::impl
                     const i8 dr_dg = dr - dg;
                     const i8 db_dg = db - dg;
 
-                    if (op::should_diff(dr, dg, db)) {
+                    if (util::should_diff(dr, dg, db)) {
                         chunks.write_diff(dr, dg, db);
-                    } else if (op::should_luma(dg, dr_dg, db_dg)) {
+                    } else if (util::should_luma(dg, dr_dg, db_dg)) {
                         chunks.write_luma(dg, dr_dg, db_dg);
                     } else {
                         chunks.write_rgb(curr_pixel);
@@ -196,8 +79,8 @@ namespace qoipp::impl
             }
 
             prev_pixel = curr_pixel;
-            if constexpr (Out::is_checked) {
-                if (not out.ok()) {
+            if constexpr (Checked) {
+                if (not chunks.ok()) {
                     return std::nullopt;
                 }
             }
@@ -209,10 +92,10 @@ namespace qoipp::impl
         }
         chunks.write_end_marker();
 
-        return out.ok() ? std::optional{ chunks.count() } : std::nullopt;
+        return chunks.ok() ? std::optional{ chunks.count() } : std::nullopt;
     }
 
-    template <PixelWriter Out>
+    template <util::PixelWriter Out>
     void decode(Out out, ByteCSpan in, Channels channels, usize width, usize height) noexcept(false)
     {
         auto seen_pixels = RunningArray{};
@@ -220,7 +103,7 @@ namespace qoipp::impl
 
         const auto get = [&](usize index) -> u8 { return index < in.size() ? in[index] : 0x00; };
 
-        seen_pixels[hash(prev_pixel) % constants::running_array_size] = prev_pixel;
+        seen_pixels[util::hash(prev_pixel) % constants::running_array_size] = prev_pixel;
 
         const auto chunks_size = in.size() - constants::header_size - constants::end_marker.size();
         for (usize pixel_index = 0, data_index = constants::header_size;
@@ -231,7 +114,7 @@ namespace qoipp::impl
             auto       curr_pixel = prev_pixel;
 
             switch (tag) {
-            case op::Tag::OP_RGB: {
+            case util::Tag::OP_RGB: {
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
@@ -239,7 +122,7 @@ namespace qoipp::impl
                     curr_pixel.a = prev_pixel.a;
                 }
             } break;
-            case op::Tag::OP_RGBA: {
+            case util::Tag::OP_RGBA: {
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
@@ -249,11 +132,11 @@ namespace qoipp::impl
             } break;
             default:
                 switch (tag & 0b11000000) {
-                case op::Tag::OP_INDEX: {
+                case util::Tag::OP_INDEX: {
                     auto& pixel = seen_pixels[tag & 0b00111111];
                     curr_pixel  = pixel;
                 } break;
-                case op::Tag::OP_DIFF: {
+                case util::Tag::OP_DIFF: {
                     const i8 dr = ((tag & 0b00110000) >> 4) - constants::bias_op_diff;
                     const i8 dg = ((tag & 0b00001100) >> 2) - constants::bias_op_diff;
                     const i8 db = ((tag & 0b00000011)) - constants::bias_op_diff;
@@ -265,7 +148,7 @@ namespace qoipp::impl
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
-                case op::Tag::OP_LUMA: {
+                case util::Tag::OP_LUMA: {
                     const auto read_blue = get(data_index++);
 
                     const u8 dg    = (tag & 0b00111111) - constants::bias_op_luma_g;
@@ -279,7 +162,7 @@ namespace qoipp::impl
                         curr_pixel.a = static_cast<u8>(prev_pixel.a);
                     }
                 } break;
-                case op::Tag::OP_RUN: {
+                case util::Tag::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::bias_op_run;
                     while (run-- > 0 and pixel_index < width * height) {
                         out.write(pixel_index++, prev_pixel);
@@ -295,7 +178,7 @@ namespace qoipp::impl
             }
 
             out.write(pixel_index, curr_pixel);
-            prev_pixel = seen_pixels[hash(curr_pixel) % constants::running_array_size] = curr_pixel;
+            prev_pixel = seen_pixels[util::hash(curr_pixel) % constants::running_array_size] = curr_pixel;
         }
     }
 }
@@ -335,7 +218,7 @@ namespace qoipp
         auto magic = std::array<char, constants::magic.size()>{};
         std::memcpy(magic.data(), in_data.data(), magic.size());
 
-        if (magic != constants::magic) {
+        if (not std::ranges::equal(magic, constants::magic)) {
             return make_error<Desc>(Error::NotQoi);
         }
 
@@ -356,8 +239,8 @@ namespace qoipp
         }
 
         return Desc{
-            .width      = to_native_endian(width),
-            .height     = to_native_endian(height),
+            .width      = util::to_native_endian(width),
+            .height     = util::to_native_endian(height),
             .channels   = *channels,
             .colorspace = *colorspace,
         };
@@ -391,29 +274,23 @@ namespace qoipp
 
         if (in_data.size() == 0) {
             return make_error<ByteVec>(Error::Empty);
-        } else if (not desc_is_valid(desc)) {
-            return make_error<ByteVec>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<ByteVec>(Error::TooBig);
-        } else if (in_data.size() != bytes_count) {
+            return make_error<ByteVec>(bytes_count.error());
+        } else if (in_data.size() != bytes_count.value()) {
             return make_error<ByteVec>(Error::MismatchedDesc);
         }
 
-        // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // chanels + 1 tag
-                              + constants::header_size + constants::end_marker.size();
-
         auto result = ByteVec{};
         try {
-            result = ByteVec(worst_size);
+            result = ByteVec(worst_size(desc).value());
         } catch (...) {
             return make_error<ByteVec>(Error::BadAlloc);
         }
 
-        auto writer = impl::SimpleByteWriter<false>{ result };
-        auto reader = impl::SimplePixelReader{ in_data, channels };
+        auto writer = util::SimpleByteWriter{ result };
+        auto reader = util::SimplePixelReader{ in_data, channels };
 
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace).value();
+        const auto count = impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
         result.resize(count);
 
         return result;
@@ -422,27 +299,21 @@ namespace qoipp
     Result<ByteVec> encode(PixelGenFun in_func, Desc desc) noexcept
     {
         const auto [width, height, channels, colorspace] = desc;
-        if (not desc_is_valid(desc)) {
-            return make_error<ByteVec>(Error::InvalidDesc);
-        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<ByteVec>(Error::TooBig);
+        if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<ByteVec>(bytes_count.error());
         }
-
-        // worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba)
-        const auto worst_size = (static_cast<usize>(channels) + 1) * width * height    // OP_RGBA
-                              + constants::header_size + constants::end_marker.size();
 
         auto result = ByteVec{};
         try {
-            result = ByteVec(worst_size);
+            result = ByteVec(worst_size(desc).value());
         } catch (...) {
             return make_error<ByteVec>(Error::BadAlloc);
         }
 
-        auto writer = impl::SimpleByteWriter<false>{ result };
-        auto reader = impl::FuncPixelReader{ in_func, channels };
+        auto writer = util::SimpleByteWriter{ result };
+        auto reader = util::FuncPixelReader{ in_func, channels };
 
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace).value();
+        const auto count = impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
         result.resize(count);
 
         return result;
@@ -454,18 +325,22 @@ namespace qoipp
 
         if (in_data.size() == 0) {
             return make_error<usize>(Error::Empty);
-        } else if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
-        } else if (in_data.size() != bytes_count) {
+        }
+
+        const auto bytes_count = count_bytes(desc);
+        if (not bytes_count) {
+            return make_error<usize>(bytes_count.error());
+        } else if (in_data.size() != bytes_count.value()) {
             return make_error<usize>(Error::MismatchedDesc);
         }
 
-        auto writer = impl::SimpleByteWriter<true>{ out_buf };
-        auto reader = impl::SimplePixelReader{ in_data, channels };
+        auto writer = util::SimpleByteWriter{ out_buf };
+        auto reader = util::SimplePixelReader{ in_data, channels };
 
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        const auto count = out_buf.size() >= worst_size(desc).value()
+                             ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
+                             : impl::encode<true>(writer, reader, width, height, channels, colorspace);
+
         if (not count) {
             return make_error<usize>(Error::NotEnoughSpace);
         }
@@ -475,16 +350,19 @@ namespace qoipp
     Result<usize> encode_into(ByteSpan out_buf, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
-        if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
+
+        const auto bytes_count = count_bytes(desc);
+        if (not bytes_count) {
+            return make_error<usize>(bytes_count.error());
         }
 
-        auto writer = impl::SimpleByteWriter<true>{ out_buf };
-        auto reader = impl::FuncPixelReader{ in_func, channels };
+        auto writer = util::SimpleByteWriter{ out_buf };
+        auto reader = util::FuncPixelReader{ in_func, channels };
 
-        const auto count = impl::encode(writer, reader, width, height, channels, colorspace);
+        const auto count = out_buf.size() >= worst_size(desc).value()
+                             ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
+                             : impl::encode<true>(writer, reader, width, height, channels, colorspace);
+
         if (not count) {
             return make_error<usize>(Error::NotEnoughSpace);
         }
@@ -497,35 +375,29 @@ namespace qoipp
 
         if (in_data.size() == 0) {
             return make_error<usize>(Error::Empty);
-        } else if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
-        } else if (in_data.size() != bytes_count) {
+            return make_error<usize>(bytes_count.error());
+        } else if (in_data.size() != bytes_count.value()) {
             return make_error<usize>(Error::MismatchedDesc);
         }
 
-        auto writer = impl::FuncByteWriter{ out_func };
-        auto reader = impl::SimplePixelReader{ in_data, channels };
+        auto writer = util::FuncByteWriter{ out_func };
+        auto reader = util::SimplePixelReader{ in_data, channels };
 
-        // TODO: allow function interruption and handle interruption
-        return impl::encode(writer, reader, width, height, channels, colorspace).value();
+        return impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
     }
 
     Result<usize> encode_into(ByteSinkFun out_func, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
-        if (not desc_is_valid(desc)) {
-            return make_error<usize>(Error::InvalidDesc);
-        } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
+        if (const auto bytes_count = count_bytes(desc); not bytes_count) {
+            return make_error<usize>(bytes_count.error());
         }
 
-        auto writer = impl::FuncByteWriter{ out_func };
-        auto reader = impl::FuncPixelReader{ in_func, channels };
+        auto writer = util::FuncByteWriter{ out_func };
+        auto reader = util::FuncPixelReader{ in_func, channels };
 
-        // TODO: allow function and handle interruption
-        return impl::encode(writer, reader, width, height, channels, colorspace).value();
+        return impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
     }
 
     Result<usize> encode_into(const fs::path& out_path, ByteCSpan in_data, Desc desc, bool overwrite) noexcept
@@ -535,7 +407,7 @@ namespace qoipp
         } else if (fs::exists(out_path) and not fs::is_regular_file(out_path)) {
             return make_error<usize>(Error::NotRegularFile);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
+            return make_error<usize>(bytes_count.error());
         }
 
         auto encoded = encode(in_data, desc);
@@ -569,7 +441,7 @@ namespace qoipp
         } else if (fs::exists(out_path) and not fs::is_regular_file(out_path)) {
             return make_error<usize>(Error::NotRegularFile);
         } else if (const auto bytes_count = count_bytes(desc); not bytes_count) {
-            return make_error<usize>(Error::TooBig);
+            return make_error<usize>(bytes_count.error());
         }
 
         auto encoded = encode(in_func, desc);
@@ -613,7 +485,7 @@ namespace qoipp
 
         const auto bytes_count = count_bytes(header.value());
         if (not bytes_count) {
-            return make_error<Image>(Error::TooBig);
+            return make_error<Image>(bytes_count.error());
         }
 
         auto result = ByteVec{};
@@ -623,7 +495,7 @@ namespace qoipp
             return make_error<Image>(Error::BadAlloc);
         }
 
-        auto writer = impl::SimplePixelWriter<false>{ result, dest };
+        auto writer = util::SimplePixelWriter<false>{ result, dest };
 
         impl::decode(writer, in_data, src, width, height);
 
@@ -693,17 +565,22 @@ namespace qoipp
         const auto src  = channels;
         const auto dest = target.value_or(channels);
 
-        if (const auto bytes_count = count_bytes(header.value()); not bytes_count) {
-            return make_error<Desc>(Error::TooBig);
-        } else if (out_buf.size() < bytes_count) {
+        const auto bytes_count = count_bytes(header.value());
+        if (not bytes_count) {
+            return make_error<Desc>(bytes_count.error());
+        } else if (out_buf.size() < bytes_count.value()) {
             return make_error<Desc>(Error::NotEnoughSpace);
         }
 
         channels = dest;
 
-        auto writer = impl::SimplePixelWriter<true>{ out_buf, dest };
-
-        impl::decode(writer, in_data, src, width, height);
+        if (out_buf.size() >= *bytes_count) {
+            auto writer = util::SimplePixelWriter<false>{ out_buf, dest };
+            impl::decode(writer, in_data, src, width, height);
+        } else {
+            auto writer = util::SimplePixelWriter<true>{ out_buf, dest };
+            impl::decode(writer, in_data, src, width, height);
+        }
 
         if (flip_vertically) {
             const auto linesize = width * static_cast<usize>(dest);
@@ -732,7 +609,7 @@ namespace qoipp
 
         auto& [width, height, channels, colorspace] = header.value();
 
-        auto writer = impl::FuncPixelWriter{ out_func };
+        auto writer = util::FuncPixelWriter{ out_func };
         impl::decode(writer, in_data, channels, width, height);
 
         return std::move(header).value();

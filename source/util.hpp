@@ -2,9 +2,9 @@
 #define QOIPP_UTIL_HPP_XGTYIRU3W5F4N
 
 #include "qoipp/common.hpp"
+#include <cstring>
 
-// utils and aliases
-namespace qoipp
+namespace qoipp::inline aliases
 {
     using i8  = std::int8_t;
     using i16 = std::int16_t;
@@ -21,9 +21,37 @@ namespace qoipp
 
     using f32 = float;
     using f64 = double;
+}
 
-    template <usize N>
-    using ByteArr = std::array<u8, N>;
+namespace qoipp::constants
+{
+    constexpr i8 bias_op_run     = -1;
+    constexpr i8 bias_op_diff    = 2;
+    constexpr i8 bias_op_luma_g  = 32;
+    constexpr i8 bias_op_luma_rb = 8;
+    constexpr i8 run_limit       = 62;
+    constexpr i8 min_diff        = -2;
+    constexpr i8 max_diff        = 1;
+    constexpr i8 min_luma_g      = -32;
+    constexpr i8 max_luma_g      = 31;
+    constexpr i8 min_luma_rb     = -8;
+    constexpr i8 max_luma_rb     = 7;
+
+    constexpr ByteArr<8> end_marker = { 0, 0, 0, 0, 0, 0, 0, 1 };
+    constexpr Pixel      start      = { 0x00, 0x00, 0x00, 0xFF };
+}
+
+namespace qoipp::util
+{
+    enum Tag : u8
+    {
+        OP_RGB   = 0b11111110,
+        OP_RGBA  = 0b11111111,
+        OP_INDEX = 0b00000000,
+        OP_DIFF  = 0b01000000,
+        OP_LUMA  = 0b10000000,
+        OP_RUN   = 0b11000000,
+    };
 
     template <typename T, typename... Ts>
     concept AnyOf = (std::same_as<T, Ts> or ...);
@@ -51,10 +79,8 @@ namespace qoipp
 
     template <typename T>
     concept ByteWriter = requires (const T ct, T t, usize idx, u8 byte) {
-        { decay_copy(T::is_checked) } -> std::same_as<bool>;    // NOTE: must also be constexpr
-
         { t.write(idx, byte) } -> std::same_as<void>;
-        { ct.ok() } -> std::same_as<bool>;
+        { ct.is_ok(idx) } -> std::same_as<bool>;
     };
 
     template <std::integral T>
@@ -72,92 +98,6 @@ namespace qoipp
         }
     }
 
-    template <typename T, typename... Args>
-    Result<T> make_result(Args&&... args)
-    {
-#if defined(__cpp_lib_expected)
-        return Result<T>{ std::in_place, std::forward<Args>(args)... };
-#else
-        return Result<T>{ std::forward<Args>(args)... };
-#endif
-    }
-
-    template <typename T>
-    Result<T> make_error(Error error)
-    {
-#if defined(__cpp_lib_expected)
-        return Result<T>{ std::unexpect, error };
-#else
-        return Result<T>{ error };
-#endif
-    }
-
-    inline bool desc_is_valid(const Desc& desc)
-    {
-        const auto& [width, height, channels, colorspace] = desc;
-        return width > 0 and height > 0    //
-           and (channels == Channels::RGBA or channels == Channels::RGB)
-           and (colorspace == Colorspace::Linear or colorspace == Colorspace::sRGB);
-    }
-
-    inline std::optional<usize> count_bytes(const Desc& desc)
-    {
-        // detect overflow: https://stackoverflow.com/a/1815371/16506263
-        auto overflows = [](usize a, usize b) {
-            const auto c = a * b;
-            return a != 0 and c / a != b;
-        };
-
-        const auto& [width, height, channels, _] = desc;
-        if (overflows(width, height)) {
-            return std::nullopt;
-        }
-
-        const auto pixel_count = static_cast<usize>(width) * height;
-        const auto chan        = static_cast<usize>(channels);
-        if (overflows(pixel_count, chan)) {
-            return std::nullopt;
-        }
-
-        return pixel_count * chan;
-    }
-}
-
-namespace qoipp::constants
-{
-    constexpr std::array magic = { 'q', 'o', 'i', 'f' };
-
-    constexpr usize      header_size        = 14;
-    constexpr usize      running_array_size = 64;
-    constexpr ByteArr<8> end_marker         = { 0, 0, 0, 0, 0, 0, 0, 1 };
-
-    constexpr i8 bias_op_run     = -1;
-    constexpr i8 bias_op_diff    = 2;
-    constexpr i8 bias_op_luma_g  = 32;
-    constexpr i8 bias_op_luma_rb = 8;
-    constexpr i8 run_limit       = 62;
-    constexpr i8 min_diff        = -2;
-    constexpr i8 max_diff        = 1;
-    constexpr i8 min_luma_g      = -32;
-    constexpr i8 max_luma_g      = 31;
-    constexpr i8 min_luma_rb     = -8;
-    constexpr i8 max_luma_rb     = 7;
-
-    constexpr Pixel start = { 0x00, 0x00, 0x00, 0xFF };
-}
-
-namespace qoipp::op
-{
-    enum Tag : u8
-    {
-        OP_RGB   = 0b11111110,
-        OP_RGBA  = 0b11111111,
-        OP_INDEX = 0b00000000,
-        OP_DIFF  = 0b01000000,
-        OP_LUMA  = 0b10000000,
-        OP_RUN   = 0b11000000,
-    };
-
     inline bool should_diff(i8 dr, i8 dg, i8 db) noexcept
     {
         return dr >= constants::min_diff and dr <= constants::max_diff    //
@@ -172,7 +112,7 @@ namespace qoipp::op
            and dg >= constants::min_luma_g and dg <= constants::max_luma_g;
     }
 
-    template <ByteWriter Out>
+    template <ByteWriter Out, bool Checked>
     class ChunkArray
     {
     public:
@@ -183,6 +123,13 @@ namespace qoipp::op
 
         void write_header(u32 width, u32 height, Channels channels, Colorspace colorspace) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index + constants::header_size - 1)) {
+                    m_ok = false;
+                    return;
+                }
+            }
+
             for (char c : constants::magic) {
                 m_out.write(m_index++, static_cast<u8>(c));
             }
@@ -203,6 +150,12 @@ namespace qoipp::op
 
         void write_end_marker() noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index + constants::end_marker.size() - 1)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             for (auto byte : constants::end_marker) {
                 m_out.write(m_index++, byte);
             }
@@ -210,6 +163,12 @@ namespace qoipp::op
 
         void write_rgb(const Pixel& pixel) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index + 4 - 1)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             m_out.write(m_index++, Tag::OP_RGB);
             m_out.write(m_index++, pixel.r);
             m_out.write(m_index++, pixel.g);
@@ -218,6 +177,12 @@ namespace qoipp::op
 
         void write_rgba(const Pixel& pixel) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index + 5 - 1)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             m_out.write(m_index++, Tag::OP_RGBA);
             m_out.write(m_index++, pixel.r);
             m_out.write(m_index++, pixel.g);
@@ -227,11 +192,23 @@ namespace qoipp::op
 
         void write_index(u8 index) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             m_out.write(m_index++, Tag::OP_INDEX | index);    //
         }
 
         void write_diff(i8 dr, i8 dg, i8 db) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             constexpr auto bias = constants::bias_op_diff;
 
             const auto val = Tag::OP_DIFF | (dr + bias) << 4 | (dg + bias) << 2 | (db + bias);
@@ -240,6 +217,12 @@ namespace qoipp::op
 
         void write_luma(i8 dg, i8 dr_dg, i8 db_dg) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index + 2 - 1)) {
+                    m_ok = false;
+                    return;
+                }
+            }
             constexpr auto bias_g  = constants::bias_op_luma_g;
             constexpr auto bias_rb = constants::bias_op_luma_rb;
 
@@ -249,15 +232,129 @@ namespace qoipp::op
 
         void write_run(u8 run) noexcept
         {
+            if constexpr (Checked) {
+                if (not can_write(m_index)) {
+                    return;
+                }
+            }
             m_out.write(m_index++, static_cast<u8>(Tag::OP_RUN | (run + constants::bias_op_run)));
         }
 
         usize count() const noexcept { return m_index; }
+        bool  ok() { return m_ok; }
+
+        bool can_write(usize index)
+        {
+            if (not m_ok or not m_out.is_ok(index)) {
+                return m_ok = false;
+            }
+            return true;
+        }
 
     private:
         Out&  m_out;
         usize m_index = 0;
+        bool  m_ok    = true;
     };
+
+    struct SimpleByteWriter
+    {
+        ByteSpan dest;
+
+        void write(usize index, u8 byte) { dest[index] = byte; }
+        bool is_ok(usize index) const { return index < dest.size(); }
+    };
+    static_assert(ByteWriter<SimpleByteWriter>);
+
+    struct FuncByteWriter
+    {
+        ByteSinkFun func;
+
+        void write([[maybe_unused]] usize index, u8 byte) noexcept { func(byte); }
+        bool is_ok(usize) const { return true; }
+    };
+    static_assert(ByteWriter<FuncByteWriter>);
+
+    template <bool Checked>
+    struct SimplePixelWriter
+    {
+        static constexpr bool is_checked = Checked;
+
+        ByteSpan dest;
+        Channels channels;
+        bool     out_of_bound = false;
+
+        void write(usize index, const Pixel& pixel) noexcept
+        {
+            const auto offset = index * static_cast<usize>(channels);
+            if constexpr (Checked) {
+                if (offset >= dest.size()) {
+                    out_of_bound = true;
+                    return;
+                }
+            }
+
+            if (channels == Channels::RGBA) {
+                std::memcpy(dest.data() + offset, &pixel, 4);
+            } else {
+                std::memcpy(dest.data() + offset, &pixel, 3);
+            }
+        }
+
+        bool ok() const { return not out_of_bound; }
+    };
+    static_assert(PixelWriter<SimplePixelWriter<false>>);
+    static_assert(PixelWriter<SimplePixelWriter<true>>);
+
+    struct FuncPixelWriter
+    {
+        static constexpr bool is_checked = false;
+
+        PixelSinkFun func;
+
+        void write([[maybe_unused]] usize index, const Pixel& pixel) noexcept { func(pixel); }
+        bool ok() const { return true; }
+    };
+    static_assert(PixelWriter<FuncPixelWriter>);
+
+    struct SimplePixelReader
+    {
+        ByteCSpan data;
+        Channels  channels;
+
+        Pixel read(usize index) const noexcept
+        {
+            const auto offset = index * static_cast<usize>(channels);
+            if (channels == Channels::RGBA) {
+                return { data[offset + 0], data[offset + 1], data[offset + 2], data[offset + 3] };
+            } else {
+                return { data[offset + 0], data[offset + 1], data[offset + 2], 0xFF };
+            }
+        }
+    };
+    static_assert(PixelReader<SimplePixelReader>);
+
+    struct FuncPixelReader
+    {
+        PixelGenFun func;
+        Channels    channels;
+
+        Pixel read(usize index) const noexcept
+        {
+            auto pixel = func(index);
+            if (channels == Channels::RGB) {
+                pixel.a = 0xFF;
+            }
+            return pixel;
+        }
+    };
+    static_assert(PixelReader<FuncPixelReader>);
+
+    inline usize hash(const Pixel& pixel)
+    {
+        const auto& [r, g, b, a] = pixel;
+        return (r * 3 + g * 5 + b * 7 + a * 11);
+    }
 }
 
 #endif
