@@ -3,6 +3,7 @@
 #include "util.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -13,7 +14,7 @@ namespace qoipp::impl
 
     // TODO: maybe add the unchecked template parameter here instead of on SimpleByteWriter
     template <bool Checked, util::PixelReader In, util::ByteWriter Out>
-    std::optional<usize> encode(
+    EncodeStatus encode(
         Out        out,
         In         in,
         u32        width,
@@ -81,7 +82,7 @@ namespace qoipp::impl
             prev_pixel = curr_pixel;
             if constexpr (Checked) {
                 if (not chunks.ok()) {
-                    return std::nullopt;
+                    return { chunks.count(), false };
                 }
             }
         }
@@ -92,7 +93,7 @@ namespace qoipp::impl
         }
         chunks.write_end_marker();
 
-        return chunks.ok() ? std::optional{ chunks.count() } : std::nullopt;
+        return { chunks.count(), chunks.ok() };
     }
 
     template <util::PixelWriter Out>
@@ -290,9 +291,10 @@ namespace qoipp
         auto writer = util::SimpleByteWriter{ result };
         auto reader = util::SimplePixelReader{ in_data, channels };
 
-        const auto count = impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
-        result.resize(count);
+        const auto status = impl::encode<false>(writer, reader, width, height, channels, colorspace);
+        assert(status.complete);
 
+        result.resize(status.written);
         return result;
     }
 
@@ -313,60 +315,51 @@ namespace qoipp
         auto writer = util::SimpleByteWriter{ result };
         auto reader = util::FuncPixelReader{ in_func, channels };
 
-        const auto count = impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
-        result.resize(count);
+        const auto status = impl::encode<false>(writer, reader, width, height, channels, colorspace);
+        assert(status.complete);
 
+        result.resize(status.written);
         return result;
     }
 
-    Result<usize> encode_into(ByteSpan out_buf, ByteCSpan in_data, Desc desc)
+    Result<EncodeStatus> encode_into(ByteSpan out_buf, ByteCSpan in_data, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
         if (in_data.size() == 0) {
-            return make_error<usize>(Error::Empty);
+            return make_error<EncodeStatus>(Error::Empty);
         }
 
         const auto bytes_count = count_bytes(desc);
         if (not bytes_count) {
-            return make_error<usize>(bytes_count.error());
+            return make_error<EncodeStatus>(bytes_count.error());
         } else if (in_data.size() != bytes_count.value()) {
-            return make_error<usize>(Error::MismatchedDesc);
+            return make_error<EncodeStatus>(Error::MismatchedDesc);
         }
 
         auto writer = util::SimpleByteWriter{ out_buf };
         auto reader = util::SimplePixelReader{ in_data, channels };
 
-        const auto count = out_buf.size() >= worst_size(desc).value()
-                             ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
-                             : impl::encode<true>(writer, reader, width, height, channels, colorspace);
-
-        if (not count) {
-            return make_error<usize>(Error::NotEnoughSpace);
-        }
-        return count.value();
+        return out_buf.size() >= worst_size(desc).value()
+                 ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
+                 : impl::encode<true>(writer, reader, width, height, channels, colorspace);
     }
 
-    Result<usize> encode_into(ByteSpan out_buf, PixelGenFun in_func, Desc desc)
+    Result<EncodeStatus> encode_into(ByteSpan out_buf, PixelGenFun in_func, Desc desc)
     {
         const auto [width, height, channels, colorspace] = desc;
 
         const auto bytes_count = count_bytes(desc);
         if (not bytes_count) {
-            return make_error<usize>(bytes_count.error());
+            return make_error<EncodeStatus>(bytes_count.error());
         }
 
         auto writer = util::SimpleByteWriter{ out_buf };
         auto reader = util::FuncPixelReader{ in_func, channels };
 
-        const auto count = out_buf.size() >= worst_size(desc).value()
-                             ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
-                             : impl::encode<true>(writer, reader, width, height, channels, colorspace);
-
-        if (not count) {
-            return make_error<usize>(Error::NotEnoughSpace);
-        }
-        return count.value();
+        return out_buf.size() >= worst_size(desc).value()
+                 ? impl::encode<false>(writer, reader, width, height, channels, colorspace)
+                 : impl::encode<true>(writer, reader, width, height, channels, colorspace);
     }
 
     Result<usize> encode_into(ByteSinkFun out_func, ByteCSpan in_data, Desc desc)
@@ -384,7 +377,7 @@ namespace qoipp
         auto writer = util::FuncByteWriter{ out_func };
         auto reader = util::SimplePixelReader{ in_data, channels };
 
-        return impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
+        return impl::encode<false>(writer, reader, width, height, channels, colorspace).written;
     }
 
     Result<usize> encode_into(ByteSinkFun out_func, PixelGenFun in_func, Desc desc)
@@ -397,7 +390,7 @@ namespace qoipp
         auto writer = util::FuncByteWriter{ out_func };
         auto reader = util::FuncPixelReader{ in_func, channels };
 
-        return impl::encode<false>(writer, reader, width, height, channels, colorspace).value();
+        return impl::encode<false>(writer, reader, width, height, channels, colorspace).written;
     }
 
     Result<usize> encode_into(const fs::path& out_path, ByteCSpan in_data, Desc desc, bool overwrite) noexcept
