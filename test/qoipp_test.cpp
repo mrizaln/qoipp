@@ -237,6 +237,9 @@ int main()
     using namespace ut::operators;
     using ut::expect, ut::that;
 
+    // this number is chosen seems it happen both test images have this as a valid chunk boundary
+    constexpr auto chunk_boundary = 1007u;
+
     // rgb
     // ---
     constexpr auto desc_3 = qoipp::Desc{
@@ -299,21 +302,24 @@ int main()
         const auto& [desc, raw, qoi, _] = input;
 
         "with sufficient buffer"_test = [&] {
-            auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
-            auto buffer  = ByteVec(worst);
-            auto count   = qoipp::encode_into(buffer, raw, desc).value();
-            auto encoded = ByteCSpan{ buffer.begin(), count };
+            auto buffer            = ByteVec(qoipp::worst_size(desc).value());
+            auto [count, complete] = qoipp::encode_into(buffer, raw, desc).value();
+            auto encoded           = ByteCSpan{ buffer.begin(), count };
 
+            expect(complete) << "encoding should complete";
             expect(that % encoded.size() == qoi.size());
             expect(rr::equal(encoded, qoi));
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = ByteVec(1011);
-            auto res    = qoipp::encode_into(buffer, raw, desc);
+            auto buffer            = ByteVec(chunk_boundary);
+            auto [count, complete] = qoipp::encode_into(buffer, raw, desc).value();
 
-            expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
-            expect(rr::equal(buffer, rv::take(qoi, 1011))) << "image should partially encoded";
+            expect(not complete) << "encoding should not be complete";
+            expect(that % count == chunk_boundary);
+            expect(rr::equal(buffer, rv::take(qoi, chunk_boundary)))
+                << "image should partially encoded\n"
+                << compare(buffer, rv::take(qoi, chunk_boundary));
         };
     } | simple_cases;
 
@@ -331,21 +337,24 @@ int main()
         };
 
         "with sufficient buffer"_test = [&] {
-            auto worst   = desc.width * desc.height * (static_cast<usize>(desc.channels) + 1) + 14 + 8;
-            auto buffer  = ByteVec(worst);
-            auto count   = qoipp::encode_into(buffer, gen, desc).value();
-            auto encoded = ByteCSpan{ buffer.begin(), count };
+            auto buffer            = ByteVec(qoipp::worst_size(desc).value());
+            auto [count, complete] = qoipp::encode_into(buffer, gen, desc).value();
+            auto encoded           = ByteCSpan{ buffer.begin(), count };
 
+            expect(complete) << "encoding should complete";
             expect(that % encoded.size() == qoi.size());
             expect(rr::equal(encoded, qoi));
         };
 
         "with insufficient buffer"_test = [&] {
-            auto buffer = ByteVec(1011);
-            auto res    = qoipp::encode_into(buffer, gen, desc);
+            auto buffer            = ByteVec(chunk_boundary);
+            auto [count, complete] = qoipp::encode_into(buffer, gen, desc).value();
 
-            expect(not res.has_value() and res.error() == qoipp::Error::NotEnoughSpace);
-            expect(rr::equal(buffer, rv::take(qoi, 1011))) << "image should partially encoded";
+            expect(not complete) << "encoding should not be complete";
+            expect(that % count == chunk_boundary);
+            expect(rr::equal(buffer, rv::take(qoi, chunk_boundary)))
+                << "image should partially encoded\n"
+                << compare(buffer, rv::take(qoi, chunk_boundary));
         };
     } | simple_cases;
 
