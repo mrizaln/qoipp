@@ -177,26 +177,6 @@ namespace qoipp
 {
     namespace fs = std::filesystem;
 
-    std::string_view to_string(Error err) noexcept
-    {
-        switch (err) {
-        case Error::Empty: return "Data is empty";
-        case Error::TooShort: return "Data is too short";
-        case Error::TooBig: return "Image is too big to process";
-        case Error::NotQoi: return "Not a qoi file";
-        case Error::InvalidDesc: return "Image description is invalid";
-        case Error::MismatchedDesc: return "Image description does not match the data";
-        case Error::NotEnoughSpace: return "Buffer does not have enough space";
-        case Error::NotRegularFile: return "Not a regular file";
-        case Error::FileExists: return "File already exists";
-        case Error::FileNotExists: return "File does not exist";
-        case Error::IoError: return "Unable to do read or write operation";
-        case Error::BadAlloc: return "Failed to allocate memory";
-        }
-
-        return "Unknown";
-    }
-
     Result<Desc> read_header(ByteCSpan in_data) noexcept
     {
         if (in_data.size() == 0) {
