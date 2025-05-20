@@ -21,19 +21,22 @@
 
 namespace util
 {
-    inline const auto test_image_dir = std::filesystem::current_path() / "resources" / "qoi_test_images";
+    namespace fs = std::filesystem;
+    namespace rv = ranges::views;
 
-    inline std::filesystem::path mktemp()
+    inline const auto test_image_dir = fs::current_path() / "resources" / "qoi_test_images";
+
+    inline fs::path mktemp()
     {
         auto name = std::tmpnam(nullptr);
-        return std::filesystem::temp_directory_path() / name;
+        return fs::temp_directory_path() / name;
     }
 
-    inline qoipp::ByteVec read_file(const std::filesystem::path& path)
+    inline qoipp::ByteVec read_file(const fs::path& path)
     {
         auto file = std::ifstream{ path, std::ios::binary };
         file.exceptions(std::ios::failbit | std::ios::badbit);
-        auto data = qoipp::ByteVec(std::filesystem::file_size(path));
+        auto data = qoipp::ByteVec(fs::file_size(path));
         file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
         return data;
     }
@@ -47,7 +50,7 @@ namespace util
         auto result = qoipp::ByteVec{};
         result.reserve(data.size() / 4 * 3);
 
-        for (auto chunk : ranges::views::chunk(data, 4)) {
+        for (auto chunk : rv::chunk(data, 4)) {
             result.insert(result.end(), chunk.begin(), chunk.begin() + 3);
         }
 
@@ -63,7 +66,7 @@ namespace util
         auto result = qoipp::ByteVec{};
         result.reserve(data.size() / 3 * 4);
 
-        for (auto chunk : ranges::views::chunk(data, 3)) {
+        for (auto chunk : rv::chunk(data, 3)) {
             result.insert(result.end(), chunk.begin(), chunk.begin() + 3);
             result.push_back(0xFF);
         }
@@ -71,7 +74,7 @@ namespace util
         return result;
     }
 
-    inline qoipp::Image load_image_stb(const std::filesystem::path& file)
+    inline qoipp::Image load_image_stb(const fs::path& file)
     {
         int   width, height, channels;
         auto* data = stbi_load(file.c_str(), &width, &height, &channels, 0);
@@ -93,21 +96,18 @@ namespace util
         return image;
     }
 
-    inline std::string compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, std::size_t chunk = 32)
+    inline std::string compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 32)
     {
         auto to_span = [](auto&& r) { return qoipp::ByteCSpan{ r.begin(), r.end() }; };
 
-        auto lchunked = lhs | ranges::views::chunk(chunk) | ranges::views::transform(to_span)
-                      | ranges::to<std::vector>();
-        auto rchunked = rhs | ranges::views::chunk(chunk) | ranges::views::transform(to_span)
-                      | ranges::to<std::vector>();
+        auto lchunked = lhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
+        auto rchunked = rhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
 
-        auto [lcs, ses, edit_dist]
-            = dtl_modern::diff(lchunked, rchunked, [](qoipp::ByteCSpan l, qoipp::ByteCSpan r) {
-                  auto lz = l.size();
-                  auto rz = r.size();
-                  return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
-              });
+        auto [lcs, ses, edit_dist] = dtl_modern::diff(lchunked, rchunked, [](auto l, auto r) {
+            auto lz = l.size();
+            auto rz = r.size();
+            return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
+        });
 
         auto buffer = std::string{ '\n' };
         auto out    = std::back_inserter(buffer);
@@ -130,14 +130,43 @@ namespace util
                 auto offset = elem.begin() - lhs.begin();
                 prev_common = false;
                 auto joined = fmt::join(elem, " ");
-                fmt::format_to(out, red, "{:04x}-{:04x}: {:02x}\n", offset, offset + chunk, joined);
+                fmt::format_to(out, red, "{:06x}: {:02x}\n", offset, joined);
             } break;
             case E::Add: {
                 auto offset = elem.begin() - rhs.begin();
                 prev_common = false;
                 auto joined = fmt::join(elem, " ");
-                fmt::format_to(out, green, "{:04x}-{:04x}: {:02x}\n", offset, offset + chunk, joined);
+                fmt::format_to(out, green, "{:06x}: {:02x}\n", offset, joined);
             } break;
+            }
+        }
+
+        return buffer;
+    }
+
+    inline std::string compare_detail(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 32)
+    {
+        auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs, rhs);
+
+        auto buffer = std::string{ '\n' };
+        auto out    = std::back_inserter(buffer);
+
+        const auto red   = bg(fmt::color::dark_red);
+        const auto green = bg(fmt::color::dark_green);
+        const auto gray  = fg(fmt::color::gray);
+
+        auto count = 0;
+
+        for (auto [elem, info] : ses.get()) {
+            using E = dtl_modern::SesEdit;
+            switch (info.m_type) {
+            case E::Common: fmt::format_to(out, gray, "{:02x} ", elem); break;
+            case E::Delete: fmt::format_to(out, red, "{:02x} ", elem); break;
+            case E::Add: fmt::format_to(out, green, "{:02x} ", elem); break;
+            }
+            if (++count == chunk) {
+                count = 0;
+                out   = '\n';
             }
         }
 
