@@ -125,7 +125,6 @@ namespace qoipp::util
         {
             if constexpr (Checked) {
                 if (not can_write(m_index + constants::header_size - 1)) {
-                    m_ok = false;
                     return;
                 }
             }
@@ -151,8 +150,7 @@ namespace qoipp::util
         void write_end_marker() noexcept
         {
             if constexpr (Checked) {
-                if (not can_write(m_index + constants::end_marker.size() - 1)) {
-                    m_ok = false;
+                if (not can_write(m_index + constants::end_marker_size - 1)) {
                     return;
                 }
             }
@@ -165,7 +163,6 @@ namespace qoipp::util
         {
             if constexpr (Checked) {
                 if (not can_write(m_index + 4 - 1)) {
-                    m_ok = false;
                     return;
                 }
             }
@@ -179,7 +176,6 @@ namespace qoipp::util
         {
             if constexpr (Checked) {
                 if (not can_write(m_index + 5 - 1)) {
-                    m_ok = false;
                     return;
                 }
             }
@@ -194,18 +190,16 @@ namespace qoipp::util
         {
             if constexpr (Checked) {
                 if (not can_write(m_index)) {
-                    m_ok = false;
                     return;
                 }
             }
-            m_out.write(m_index++, Tag::OP_INDEX | index);    //
+            m_out.write(m_index++, Tag::OP_INDEX | index);
         }
 
         void write_diff(i8 dr, i8 dg, i8 db) noexcept
         {
             if constexpr (Checked) {
                 if (not can_write(m_index)) {
-                    m_ok = false;
                     return;
                 }
             }
@@ -219,7 +213,6 @@ namespace qoipp::util
         {
             if constexpr (Checked) {
                 if (not can_write(m_index + 2 - 1)) {
-                    m_ok = false;
                     return;
                 }
             }
@@ -288,7 +281,7 @@ namespace qoipp::util
         {
             const auto offset = index * static_cast<usize>(channels);
             if constexpr (Checked) {
-                if (offset >= dest.size()) {
+                if (offset >= dest.size() + static_cast<u32>(channels) - 1) {
                     out_of_bound = true;
                     return;
                 }
