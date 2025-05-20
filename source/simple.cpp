@@ -119,17 +119,12 @@ namespace qoipp::impl
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if (channels == Channels::RGBA) {
-                    curr_pixel.a = prev_pixel.a;
-                }
             } break;
             case util::Tag::OP_RGBA: {
                 curr_pixel.r = get(data_index++);
                 curr_pixel.g = get(data_index++);
                 curr_pixel.b = get(data_index++);
-                if (channels == Channels::RGBA) {
-                    curr_pixel.a = get(data_index++);
-                }
+                curr_pixel.a = get(data_index++);
             } break;
             default:
                 switch (tag & 0b11000000) {
@@ -145,23 +140,17 @@ namespace qoipp::impl
                     curr_pixel.r = static_cast<u8>(dr + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(db + prev_pixel.b);
-                    if (channels == Channels::RGBA) {
-                        curr_pixel.a = static_cast<u8>(prev_pixel.a);
-                    }
                 } break;
                 case util::Tag::OP_LUMA: {
-                    const auto read_blue = get(data_index++);
+                    const auto red_blue = get(data_index++);
 
                     const u8 dg    = (tag & 0b00111111) - constants::bias_op_luma_g;
-                    const u8 dr_dg = ((read_blue & 0b11110000) >> 4) - constants::bias_op_luma_rb;
-                    const u8 db_dg = (read_blue & 0b00001111) - constants::bias_op_luma_rb;
+                    const u8 dr_dg = ((red_blue & 0b11110000) >> 4) - constants::bias_op_luma_rb;
+                    const u8 db_dg = (red_blue & 0b00001111) - constants::bias_op_luma_rb;
 
                     curr_pixel.r = static_cast<u8>(dg + dr_dg + prev_pixel.r);
                     curr_pixel.g = static_cast<u8>(dg + prev_pixel.g);
                     curr_pixel.b = static_cast<u8>(dg + db_dg + prev_pixel.b);
-                    if (channels == Channels::RGBA) {
-                        curr_pixel.a = static_cast<u8>(prev_pixel.a);
-                    }
                 } break;
                 case util::Tag::OP_RUN: {
                     auto run = (tag & 0b00111111) - constants::bias_op_run;
