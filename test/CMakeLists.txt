@@ -44,6 +44,7 @@ endfunction()
 enable_testing()
 
 create_test_exe(simple_test)
+create_test_exe(stream_test)
 
 add_custom_command(
     TARGET simple_test
