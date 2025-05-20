@@ -71,71 +71,41 @@ int main()
 
     const auto simple_cases = std::array{ test_case_3, test_case_4 };
 
-    "stream encoder should be able to encode image"_test = [&](auto&& input) {
-        const auto& [desc, raw, qoi, _] = input;
+    for (auto i = 5u; i < 1024; ++i) {
+        "stream encoder should be able to encode image"_test = [&](auto&& input) {
+            const auto& [desc, raw, qoi, _] = input;
 
-        auto encoder = qoipp::StreamEncoder{ desc.channels };
-        auto encoded = ByteVec(qoipp::constants::header_size);
+            auto start = fmt::format("encode start chan={} buf={}", static_cast<int>(desc.channels), i);
+            ut::log << start;
+            fmt::println("{}", start);
 
-        auto res = qoipp::write_header(encoded, desc);
-        expect(res.has_value()) << "write header should succesful";
+            auto encoder = qoipp::StreamEncoder{};
+            auto encoded = ByteVec(qoipp::constants::header_size);
 
-        auto off = 0ul;
-        auto out = ByteArr<256>{};
+            auto res = encoder.initialize(encoded, desc);
+            expect(res.has_value()) << "write header should successful";
 
-        fmt::println("encode start {} channels", static_cast<int>(desc.channels));
+            auto off = 0ul;
+            auto out = ByteVec(i);
 
-        while (off < raw.size()) {
-            auto in             = ByteCSpan{ raw.data() + off, std::min(out.size(), raw.size() - off) };
-            auto [read, write]  = encoder.encode(out, in);
-            off                += read;
-            if (read == 0 and write == 0) {
-                break;
+            while (off < raw.size()) {
+                auto in  = ByteCSpan{ raw.data() + off, std::min(out.size(), raw.size() - off) };
+                auto res = encoder.encode(out, in);
+                expect(res.has_value()) << "encode should successful";
+
+                auto [read, write]  = res.value();
+                off                += read;
+                encoded.insert(encoded.end(), out.begin(), out.begin() + write);
             }
-            fmt::println("read: {} | write: {} | in: {}", read, write, in.size());
-            encoded.insert(encoded.end(), out.begin(), out.begin() + write);
 
-            using namespace std::chrono_literals;
-            std::this_thread::sleep_for(100ms);
-        }
+            auto size       = encoded.size();
+            auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
+            encoded.resize(size + additional);
 
-        auto size = encoded.size();
-        encoded.resize(size + qoipp::constants::end_marker_size);
+            encoder.finalize({ encoded.data() + size, additional });
 
-        qoipp::write_end_marker(ByteSpan{ encoded.begin() + size, qoipp::constants::end_marker_size });
-
-        expect(that % encoded.size() == qoi.size());
-        auto drop_header = rv::drop(qoipp::constants::header_size);
-        expect(rr::equal(encoded, qoi)) << util::compare(drop_header(encoded), drop_header(qoi), 16);
-    } | simple_cases;
-
-    // auto [raw, desc] = util::load_image_stb("percival.png");
-
-    // auto encoder = qoipp::StreamEncoder{ desc.channels };
-    // auto encoded = ByteVec(qoipp::constants::header_size);
-
-    // auto res = qoipp::write_header(encoded, desc);
-    // expect(res.has_value()) << "write header should succesful";
-
-    // auto off = 0ul;
-    // auto out = ByteArr<256>{};
-
-    // while (off < raw.size()) {
-    //     auto in             = ByteCSpan{ raw.data() + off, std::min(out.size(), raw.size() - off) };
-    //     auto [read, write]  = encoder.encode(out, in);
-    //     off                += read;
-    //     if (read == 0 and write == 0) {
-    //         break;
-    //     }
-    //     fmt::println("read: {} | write: {} | in: {}", read, write, in.size());
-    //     encoded.insert(encoded.end(), out.begin(), out.begin() + write);
-    // }
-
-    // auto size = encoded.size();
-    // encoded.resize(size + qoipp::constants::end_marker_size);
-
-    // qoipp::write_end_marker(ByteSpan{ encoded.begin() + size, qoipp::constants::end_marker_size });
-
-    // auto ofile = std::ofstream{ "percival.qoi", std::ios::binary };
-    // ofile.write(reinterpret_cast<char*>(encoded.data()), encoded.size());
+            expect(that % qoi.size() == encoded.size());
+            expect(rr::equal(qoi, encoded)) << util::compare_detail(qoi, encoded, 32);
+        } | simple_cases;
+    }
 }
