@@ -1,5 +1,7 @@
 #include "qoipp/stream.hpp"
 #include "util.hpp"
+#include <iostream>
+#include <utility>
 
 namespace qoipp::impl
 {
@@ -108,65 +110,92 @@ namespace qoipp::impl
 
 namespace qoipp
 {
-    StreamEncoder::StreamEncoder(Channels channels) noexcept
-        : m_channels{ channels }
+    StreamEncoder::StreamEncoder() noexcept
+        : m_channels{}
         , m_run{ 0 }
         , m_prev{ constants::start }
         , m_seen{}
     {
     }
 
-    StreamResult StreamEncoder::encode(ByteSpan out, ByteCSpan in) noexcept
+    Result<void> StreamEncoder::initialize(ByteSpan out_buf, Desc desc) noexcept
     {
-        auto reader = impl::StreamPixelReader{ in, m_channels };
-        auto writer = util::SimpleByteWriter{ out };
-        auto chunks = util::ChunkArray<decltype(writer), true>{ writer };
-
-        if (m_run > 0) {
-            chunks.write_run(m_run);
-            if (not chunks.ok()) {
-                return { 0, chunks.count() };
-            }
-            m_run = 0;
+        if (out_buf.size() == 0) {
+            return make_error<void>(Error::Empty);
+        } else if (out_buf.size() < constants::header_size) {
+            return make_error<void>(Error::TooShort);
+        } else if (auto bytes = count_bytes(desc); not bytes) {
+            return make_error<void>(bytes.error());
         }
 
-        while (chunks.ok()) {
-            auto may_curr = reader.read();
-            if (not may_curr) {
-                break;
-            }
+        auto [width, height, channels, colorspace] = desc;
+
+        auto writer      = util::SimpleByteWriter{ out_buf };
+        auto chunk_array = util::ChunkArray<decltype(writer), false>{ writer };
+
+        chunk_array.write_header(width, height, channels, colorspace);
+
+        m_channels = desc.channels;
+        return Result<void>{};
+    }
+
+    Result<StreamResult> StreamEncoder::encode(ByteSpan out_buf, ByteCSpan in_buf) noexcept
+    {
+        if (not m_channels) {
+            return make_error<StreamResult>(Error::NotInitialized);
+        } else if (out_buf.empty() or in_buf.empty()) {
+            return make_error<StreamResult>(Error::Empty);
+        }
+
+        auto reader = impl::StreamPixelReader{ in_buf, *m_channels };
+        auto writer = util::SimpleByteWriter{ out_buf };
+        auto chunks = util::ChunkArray<decltype(writer), true>{ writer };
+
+        auto index        = u8{ 0 };
+        auto seen_prev    = Pixel{};
+        auto seen_engaged = false;
+        auto last_op      = util::Tag{};
+
+        while (auto may_curr = reader.read()) {
             auto curr = *may_curr;
 
             if (m_prev == curr) {
                 ++m_run;
                 if (m_run == constants::run_limit) {
+                    last_op = util::Tag::OP_RUN;
                     chunks.write_run(m_run);
-                    // if (not chunks.ok()) {
-                    //     m_prev = curr;
-                    //     break;
-                    // }
+                    if (not chunks.ok()) {
+                        --m_run;
+                        break;
+                    }
                     m_run = 0;
                 }
             } else {
                 if (m_run > 0) {
+                    last_op = util::Tag::OP_RUN;
                     chunks.write_run(m_run);
-                    // if (not chunks.ok()) {
-                    //     m_prev = curr;
-                    //     break;
-                    // }
+                    if (not chunks.ok()) {
+                        break;
+                    }
                     m_run = 0;
                 }
 
-                const u8 index = util::hash(curr) % constants::running_array_size;
+                index = util::hash(curr) % constants::running_array_size;
 
                 // OP_INDEX
                 if (m_seen[index] == curr) {
+                    last_op = util::Tag::OP_INDEX;
                     chunks.write_index(index);
                 } else {
-                    m_seen[index] = curr;
+                    seen_prev    = std::exchange(m_seen[index], curr);
+                    seen_engaged = true;
 
                     if (m_channels == Channels::RGBA and m_prev.a != curr.a) {
+                        last_op = util::Tag::OP_RGBA;
                         chunks.write_rgba(curr);
+                        if (not chunks.ok()) {
+                            break;
+                        }
                         m_prev = curr;
                         continue;
                     }
@@ -180,62 +209,64 @@ namespace qoipp
                     const i8 db_dg = db - dg;
 
                     if (util::should_diff(dr, dg, db)) {
+                        last_op = util::Tag::OP_DIFF;
                         chunks.write_diff(dr, dg, db);
                     } else if (util::should_luma(dg, dr_dg, db_dg)) {
+                        last_op = util::Tag::OP_LUMA;
                         chunks.write_luma(dg, dr_dg, db_dg);
                     } else {
+                        last_op = util::Tag::OP_RGB;
                         chunks.write_rgb(curr);
                     }
                 }
             }
+
+            if (not chunks.ok()) {
+                break;
+            }
             m_prev = curr;
         }
 
-        // if (chunks.ok()) {
-        //     chunks.write_run(m_run);
-        //     m_run = 0;
-        // }
+        if (not chunks.ok() and reader.ok()) {
+            // revert seen pixels
+            if (seen_engaged and last_op != util::Tag::OP_RUN and last_op != util::Tag::OP_INDEX) {
+                m_seen[index] = seen_prev;
+            }
 
-        if (not chunks.ok()) {
+            // revert reader count
             reader.decr();
         }
 
-        return { reader.count(), chunks.count() };
+        return StreamResult{ reader.count(), chunks.count() };
+    }
+
+    Result<void> StreamEncoder::finalize(ByteSpan out_buf) noexcept
+    {
+        if (out_buf.size() == 0) {
+            return make_error<void>(Error::Empty);
+        } else if (out_buf.size() < constants::end_marker_size + has_run_count()) {
+            return make_error<void>(Error::TooShort);
+        }
+
+        auto writer      = util::SimpleByteWriter{ out_buf };
+        auto chunk_array = util::ChunkArray<decltype(writer), false>{ writer };
+
+        if (has_run_count()) {
+            chunk_array.write_run(m_run);
+        }
+        chunk_array.write_end_marker();
+
+        m_channels.reset();
+        m_run  = 0;
+        m_prev = constants::start;
+        m_seen.fill(Pixel{});
+
+        return Result<void>{};
     }
 }
 
 namespace qoipp
 {
-    Result<void> write_header(ByteSpan out_buf, Desc desc) noexcept
-    {
-        if (out_buf.size() < constants::header_size) {
-            return make_error<void>(Error::TooShort);
-        }
-
-        auto [width, height, channels, colorspace] = desc;
-
-        auto writer      = util::SimpleByteWriter{ out_buf };
-        auto chunk_array = util::ChunkArray<decltype(writer), false>{ writer };
-
-        chunk_array.write_header(width, height, channels, colorspace);
-
-        return Result<void>{};
-    }
-
-    Result<void> write_end_marker(ByteSpan out_buf) noexcept
-    {
-        if (out_buf.size() < constants::end_marker_size) {
-            return make_error<void>(Error::TooShort);
-        }
-
-        auto writer      = util::SimpleByteWriter{ out_buf };
-        auto chunk_array = util::ChunkArray<decltype(writer), false>{ writer };
-
-        chunk_array.write_end_marker();
-
-        return Result<void>{};
-    }
-
     StreamDecoder::StreamDecoder(Channels channels) noexcept
         : m_channels{ channels }
         , m_run{ 0 }
