@@ -13,6 +13,14 @@
 #    include <expected>
 #endif
 
+namespace qoipp::constants
+{
+    constexpr std::string_view magic              = "qoif";
+    constexpr std::size_t      header_size        = 14;
+    constexpr std::size_t      end_marker_size    = 8;
+    constexpr std::size_t      running_array_size = 64;
+}
+
 namespace qoipp
 {
     struct Pixel;
@@ -21,6 +29,16 @@ namespace qoipp
     using ByteVec   = std::vector<Byte>;
     using ByteSpan  = std::span<Byte>;
     using ByteCSpan = std::span<const Byte>;
+
+    template <std::size_t N>
+    using ByteArr = std::array<Byte, N>;
+
+    using PixelVec   = std::vector<Pixel>;
+    using PixelSpan  = std::span<Pixel>;
+    using PixelCSpan = std::span<const Pixel>;
+
+    template <std::size_t N>
+    using PixelArr = std::array<Pixel, N>;
 
     using PixelGenFun  = std::function<Pixel(std::size_t index)>;
     using PixelSinkFun = std::function<void(Pixel pixel)>;
@@ -147,6 +165,26 @@ namespace qoipp
     };
 #endif
 
+    template <typename T, typename... Args>
+    Result<T> make_result(Args&&... args)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::in_place, std::forward<Args>(args)... };
+#else
+        return Result<T>{ std::forward<Args>(args)... };
+#endif
+    }
+
+    template <typename T>
+    Result<T> make_error(Error error)
+    {
+#if defined(__cpp_lib_expected)
+        return Result<T>{ std::unexpect, error };
+#else
+        return Result<T>{ error };
+#endif
+    }
+
     /**
      * @brief Get a human readable description for an error value.
      *
@@ -192,7 +230,7 @@ namespace qoipp
      * @tparam T The type of the elements pointed to (must be trivially copyable or void).
      * @param t Pointer to the first element of the array.
      * @param size Number of elements if T is a type, or number of bytes if T is void.
-     * @return A CSpan of std::uint8_t representing the byte view of the input array.
+     * @return A `ByteCSpan` representing the byte view of the input array.
      */
     template <typename T>
         requires std::same_as<T, void> or std::is_trivially_copyable_v<T>
@@ -203,6 +241,83 @@ namespace qoipp
         } else {
             return { reinterpret_cast<const Byte*>(t), size * sizeof(T) };
         }
+    }
+
+    /**
+     * @brief Check if iamge description is valid.
+     *
+     * @param desc The image description.
+     * @return True if valid, else false.
+     *
+     * This function doesn't check whether the number of bytes an image created with this `Desc` is
+     * `Error::TooBig` to fit into `std::size_t`. Use `count_bytes` for that.
+     */
+    inline bool is_valid(const Desc& desc)
+    {
+        const auto& [width, height, channels, colorspace] = desc;
+        return width > 0 and height > 0    //
+           and (channels == Channels::RGBA or channels == Channels::RGB)
+           and (colorspace == Colorspace::Linear or colorspace == Colorspace::sRGB);
+    }
+
+    /**
+     * @brief Count number of bytes produced by imaage described on desc.
+     *
+     * @param desc The description of the image.
+     * @return The number of bytes.
+     *
+     * This function returns
+     * - `Error::InvalidDesc` if the description is invalid, or
+     * - `Error::TooBig` if the number of bytes exceed `std::size_t` limits.
+     */
+    inline Result<std::size_t> count_bytes(const Desc& desc)
+    {
+        if (not is_valid(desc)) {
+            return make_result<std::size_t>(Error::InvalidDesc);
+        }
+
+        // detect overflow: https://stackoverflow.com/a/1815371/16506263
+        auto overflows = [](std::size_t a, std::size_t b) {
+            const auto c = a * b;
+            return a != 0 and c / a != b;
+        };
+
+        const auto& [width, height, channels, _] = desc;
+        if (overflows(width, height)) {
+            return make_result<std::size_t>(Error::TooBig);
+        }
+
+        const auto pixel_count = static_cast<std::size_t>(width) * height;
+        const auto chan        = static_cast<std::size_t>(channels);
+        if (overflows(pixel_count, chan)) {
+            return make_result<std::size_t>(Error::TooBig);
+        }
+
+        return pixel_count * chan;
+    }
+
+    /**
+     * @brief Calculate the number of bytes on the worst case encoding scenario.
+     *
+     * @param desc The description of the image.
+     * @return The number of bytes.
+     *
+     * Worst possible scenario is when no data is compressed + header + end_marker + tag (rgb/rgba).
+     *
+     * This function returns
+     * - `Error::InvalidDesc` if the description is invalid, or
+     * - `Error::TooBig` if the number of bytes exceed `std::size_t` limits.
+     */
+    inline Result<std::size_t> worst_size(const Desc& desc)
+    {
+        if (const auto bytes = count_bytes(desc); not bytes) {
+            return make_result<std::size_t>(bytes.error());
+        }
+
+        const auto& [width, height, channels, _] = desc;
+
+        return (static_cast<std::size_t>(channels) + 1) * width * height    // channels + 1 tag
+             + constants::header_size + constants::end_marker_size;
     }
 }
 
