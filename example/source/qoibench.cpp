@@ -459,10 +459,11 @@ EncodeResult<> qoipp_encode(const RawImage& image)
 {
     auto timepoint = Clock::now();
 
-    auto desc   = image.desc;
-    auto worst  = desc.width * desc.height * (static_cast<std::size_t>(desc.channels) + 1) + 14 + 8;
-    auto buffer = qoipp::ByteVec(worst);
-    auto count  = qoipp::encode_into(buffer, image.data, image.desc).value();
+    auto buffer            = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
+    auto [count, complete] = qoipp::encode_into(buffer, image.data, image.desc).value();
+    if (not complete) {
+        throw std::runtime_error{ "encode incomplete when it should have" };
+    }
     buffer.resize(count);
 
     auto duration = Clock::now() - timepoint;
@@ -475,12 +476,15 @@ EncodeResult<> qoipp_encode(const RawImage& image)
 
 DecodeResult qoipp_decode(const QoiImage& image)
 {
-    auto timepoint       = Clock::now();
-    auto [decoded, desc] = qoipp::decode(image.data).value();
-    auto duration        = Clock::now() - timepoint;
+    auto timepoint   = Clock::now();
+    auto desc        = qoipp::read_header(image.data).value();
+    auto buffer_size = desc.width * desc.height * static_cast<std::size_t>(desc.channels);
+    auto buffer      = qoipp::ByteVec(buffer_size);
+    auto _           = qoipp::decode_into(buffer, image.data).value();
+    auto duration    = Clock::now() - timepoint;
 
     return {
-        .image = { decoded, desc },
+        .image = { buffer, desc },
         .time  = duration,
     };
 }
