@@ -1,5 +1,10 @@
 #include "qoipp/stream.hpp"
+#include "qoipp/simple.hpp"
+
 #include "util.hpp"
+
+#include <cassert>
+#include <format>
 #include <iostream>
 #include <utility>
 
@@ -43,6 +48,15 @@ namespace qoipp::impl
             return arr;
         }
 
+        void decr(usize amount)
+        {
+            if (m_index < amount) {
+                assert(false and "should not happen, logic error");
+                return;
+            }
+            m_index -= amount;
+        }
+
         usize count() const { return m_index; }
         bool  ok() const { return m_ok; }
 
@@ -56,8 +70,8 @@ namespace qoipp::impl
         }
 
         ByteCSpan m_bytes;
-        usize     m_index;
-        bool      m_ok = true;
+        usize     m_index = 0;
+        bool      m_ok    = true;
     };
 
     class StreamPixelReader
@@ -120,6 +134,10 @@ namespace qoipp
 
     Result<void> StreamEncoder::initialize(ByteSpan out_buf, Desc desc) noexcept
     {
+        if (m_channels) {
+            return make_error<void>(Error::AlreadyInitialized);
+        }
+
         if (out_buf.size() == 0) {
             return make_error<void>(Error::Empty);
         } else if (out_buf.size() < constants::header_size) {
@@ -145,6 +163,8 @@ namespace qoipp
             return make_error<StreamResult>(Error::NotInitialized);
         } else if (out_buf.empty() or in_buf.empty()) {
             return make_error<StreamResult>(Error::Empty);
+        } else if (out_buf.size() < 5) {    // OP_RGBA need 5 bytes
+            return make_error<StreamResult>(Error::TooShort);
         }
 
         auto reader = impl::StreamPixelReader{ in_buf, *m_channels };
@@ -240,12 +260,14 @@ namespace qoipp
         return StreamResult{ reader.count(), chunks.count() };
     }
 
-    Result<void> StreamEncoder::finalize(ByteSpan out_buf) noexcept
+    Result<usize> StreamEncoder::finalize(ByteSpan out_buf) noexcept
     {
-        if (out_buf.size() == 0) {
-            return make_error<void>(Error::Empty);
+        if (not m_channels) {
+            return make_error<usize>(Error::NotInitialized);
+        } else if (out_buf.size() == 0) {
+            return make_error<usize>(Error::Empty);
         } else if (out_buf.size() < constants::end_marker_size + has_run_count()) {
-            return make_error<void>(Error::TooShort);
+            return make_error<usize>(Error::TooShort);
         }
 
         auto writer      = util::SimpleByteWriter{ out_buf };
@@ -256,55 +278,98 @@ namespace qoipp
         }
         chunk_array.write_end_marker();
 
+        auto write = constants::end_marker_size + has_run_count();
+
         m_channels.reset();
         m_run  = 0;
         m_prev = constants::start;
         m_seen.fill(Pixel{});
 
-        return Result<void>{};
+        return write;
+    }
+
+    void StreamEncoder::reset() noexcept
+    {
+        if (m_channels.has_value()) {
+            m_channels.reset();
+            m_run  = 0;
+            m_prev = constants::start;
+            m_seen.fill(Pixel{});
+        }
     }
 }
 
 namespace qoipp
 {
-    StreamDecoder::StreamDecoder(Channels channels) noexcept
-        : m_channels{ channels }
+    StreamDecoder::StreamDecoder() noexcept
+        : m_channels{}
         , m_run{ 0 }
         , m_prev{ constants::start }
         , m_seen{}
     {
     }
 
-    StreamResult StreamDecoder::decode(ByteSpan out, ByteCSpan in) noexcept
+    Result<Desc> StreamDecoder::initialize(ByteCSpan in_buf) noexcept
     {
-        auto reader  = impl::StreamByteReader{ in };
-        auto writer  = util::SimplePixelWriter<true>{ out, m_channels };
-        auto out_idx = 0u;
-
-        if (m_run > 0) {
-            while (m_run-- > 0 and writer.ok()) {
-                writer.write(out_idx++, m_prev);
-            }
-            --out_idx;
-            if (not writer.ok()) {
-                return { 0, out_idx };
-            }
+        if (m_channels) {
+            return make_error<Desc>(Error::AlreadyInitialized);
         }
 
-        while (reader.ok() and writer.ok()) {
-            auto tag = reader.read_one();
-            if (not tag) {
+        auto desc = read_header(in_buf);
+        if (desc) {
+            if (auto bytes = count_bytes(*desc); not bytes) {
+                return make_error<Desc>(bytes.error());
+            }
+            m_channels = desc->channels;
+        }
+
+        m_seen[util::hash(m_prev) % constants::running_array_size] = m_prev;
+
+        return desc;
+    }
+
+    Result<StreamResult> StreamDecoder::decode(ByteSpan out_buf, ByteCSpan in_buf) noexcept
+    {
+        if (not m_channels) {
+            return make_error<StreamResult>(Error::NotInitialized);
+        } else if (out_buf.size() == 0) {
+            return make_error<StreamResult>(Error::Empty);
+        } else if (out_buf.size() < constants::header_size) {
+            return make_error<StreamResult>(Error::TooShort);
+        }
+
+        auto reader     = impl::StreamByteReader{ in_buf };
+        auto writer     = util::SimplePixelWriter<true>{ out_buf, *m_channels };
+        auto out_px_idx = 0ul;
+
+        if (has_run_count()) {
+            auto count = drain(out_buf).value();
+            if (has_run_count()) {    // incomplete write
+                return StreamResult{ 0, count };
+            }
+            out_px_idx = count / static_cast<u8>(*m_channels);
+        }
+
+        auto tag       = util::Tag{};
+        auto last_read = 0u;
+
+        while (true) {
+            auto may_tag = reader.read_one();
+            if (not may_tag) {
                 break;
             }
-
+            last_read = 1;
+            tag       = static_cast<util::Tag>(*may_tag);
             auto curr = m_prev;
 
-            switch (*tag) {
+            switch (tag) {
             case util::Tag::OP_RGB: {
                 auto arr = reader.read_three();
                 if (not arr) {
                     break;
                 }
+                last_read += arr->size();
+
                 curr.r = arr->at(0);
                 curr.g = arr->at(1);
                 curr.b = arr->at(2);
@@ -314,21 +379,23 @@ namespace qoipp
                 if (not arr) {
                     break;
                 }
+                last_read += arr->size();
+
                 curr.r = arr->at(0);
                 curr.g = arr->at(1);
                 curr.b = arr->at(2);
                 curr.a = arr->at(3);
             } break;
             default:
-                switch (*tag & 0b11000000) {
+                switch (tag & 0b11000000) {
                 case util::Tag::OP_INDEX: {
-                    auto& pixel = m_seen[*tag & 0b00111111];
+                    auto& pixel = m_seen[tag & 0b00111111];
                     curr        = pixel;
                 } break;
                 case util::Tag::OP_DIFF: {
-                    const i8 dr = ((*tag & 0b00110000) >> 4) - constants::bias_op_diff;
-                    const i8 dg = ((*tag & 0b00001100) >> 2) - constants::bias_op_diff;
-                    const i8 db = ((*tag & 0b00000011)) - constants::bias_op_diff;
+                    const i8 dr = ((tag & 0b00110000) >> 4) - constants::bias_op_diff;
+                    const i8 dg = ((tag & 0b00001100) >> 2) - constants::bias_op_diff;
+                    const i8 db = ((tag & 0b00000011)) - constants::bias_op_diff;
 
                     curr.r = static_cast<u8>(dr + m_prev.r);
                     curr.g = static_cast<u8>(dg + m_prev.g);
@@ -339,8 +406,9 @@ namespace qoipp
                     if (not red_blue) {
                         break;
                     }
+                    last_read += 1;
 
-                    const u8 dg    = (*tag & 0b00111111) - constants::bias_op_luma_g;
+                    const u8 dg    = (tag & 0b00111111) - constants::bias_op_luma_g;
                     const u8 dr_dg = ((*red_blue & 0b11110000) >> 4) - constants::bias_op_luma_rb;
                     const u8 db_dg = (*red_blue & 0b00001111) - constants::bias_op_luma_rb;
 
@@ -349,12 +417,15 @@ namespace qoipp
                     curr.b = static_cast<u8>(dg + db_dg + m_prev.b);
                 } break;
                 case util::Tag::OP_RUN: {
-                    m_run = static_cast<u8>((*tag & 0b00111111) - constants::bias_op_run);
-                    while (m_run-- > 0 and writer.ok()) {
-                        writer.write(out_idx++, m_prev);
+                    m_run     = static_cast<u8>((tag & 0b00111111) - constants::bias_op_run);
+                    last_read = 0;    // since run stored independently, no need to backtrack if write fail
+                    while (m_run > 0 and writer.ok()) {
+                        --m_run;
+                        writer.write(out_px_idx++, m_prev);
                     }
-                    --out_idx;
                     if (not writer.ok()) {
+                        --out_px_idx;
+                        ++m_run;
                         break;
                     }
                     continue;
@@ -363,10 +434,51 @@ namespace qoipp
                 }
             }
 
-            writer.write(out_idx, curr);
+            writer.write(out_px_idx++, curr);
+            if (not writer.ok()) {
+                break;
+            }
             m_prev = m_seen[util::hash(curr) % constants::running_array_size] = curr;
         }
 
-        return { reader.count(), out_idx };
+        if (not writer.ok()) {
+            reader.decr(last_read);
+            --out_px_idx;
+        }
+
+        return StreamResult{ reader.count(), out_px_idx * static_cast<u8>(*m_channels) };
+    }
+
+    Result<std::size_t> StreamDecoder::drain(ByteSpan out_buf) noexcept
+    {
+        if (not m_channels) {
+            return make_error<std::size_t>(Error::NotInitialized);
+        } else if (out_buf.size() == 0) {
+            return make_error<std::size_t>(Error::Empty);
+        }
+
+        auto writer  = util::SimplePixelWriter<true>{ out_buf, *m_channels };
+        auto out_idx = 0u;
+
+        while (m_run > 0) {
+            writer.write(out_idx, m_prev);
+            if (not writer.ok()) {
+                break;
+            }
+            ++out_idx;
+            --m_run;
+        }
+
+        return out_idx * static_cast<u8>(*m_channels);
+    }
+
+    void StreamDecoder::reset() noexcept
+    {
+        if (m_channels.has_value()) {
+            m_channels.reset();
+            m_run  = 0;
+            m_prev = constants::start;
+            m_seen.fill(Pixel{});
+        }
     }
 }

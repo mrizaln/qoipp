@@ -40,7 +40,7 @@ namespace qoipp
          *
          * @param out_buf The output buffer.
          * @param in Input pixels.
-         * @return StreamResult with `processed` field set to number of pixels processed and `written` as
+         * @return StreamResult with `processed` field set to number of bytes processed and `written` as
          * number of bytes written into `out`.
          *
          * The length of `out_buf` must be no less than 5.
@@ -48,31 +48,45 @@ namespace qoipp
          * This function returns
          * - `Error::Empty` if the length of the `out_buf` or `in_buf` is zero,
          * - `Error::TooShort` if the length of the buffer is less than 5, or
-         * - `Error::NotInitialized` if the encoder hasn't initialized yet.
+         * - `Error::NotInitialized` if the encoder is not initialized.
          */
         Result<StreamResult> encode(ByteSpan out_buf, ByteCSpan in_buf) noexcept;
 
         /**
          * @brief Finalize the encoding process for this particular stream.
          *
-         * @param out_buf Output buffer
+         * @param out_buf Output buffer.
+         * @return Number of written bytes.
          *
          * This function will both reset the internal state of the encoder and fill the `out_buf` with end
          * marker. Also, if there is still `OP_RUN` left it will be written to the buffer before the end
          * marker. You can use `has_run_count` to check whether you need to reserve extra 1 byte for `OP_RUN`
-         * or not on top of end marker length.
+         * or not on top of end marker length (8 bytes).
          *
          * This function returns
          * - `Error::Empty` if the length of the `out_buf` is zero, or
          * - `Error::TooShort` if the length of the buffer is less than header length, or
-         * - `Error::NotInitialized` if the encoder is already initialized.
+         * - `Error::NotInitialized` if the encoder is not initialized.
          */
-        Result<void> finalize(ByteSpan out_buf) noexcept;
+        Result<std::size_t> finalize(ByteSpan out_buf) noexcept;
+
+        /**
+         * @brief Reset the internal state of the decoder.
+         *
+         * Useful if you want to abort the stream and start over starting with clean encoder. This function
+         * will do nothing if the encoder is not initialized.
+         */
+        void reset() noexcept;
 
         /**
          * @brief Check whether an `OP_RUN` count stored is non-zero.
          */
         bool has_run_count() const noexcept { return m_run > 0; }
+
+        /**
+         * @brief Check if encoder is already initialized.
+         */
+        bool is_initialized() const noexcept { return m_channels.has_value(); }
 
     private:
         using RunningArray = PixelArr<constants::running_array_size>;
@@ -86,30 +100,80 @@ namespace qoipp
     class StreamDecoder
     {
     public:
-        StreamDecoder(Channels channels) noexcept;
+        StreamDecoder() noexcept;
+
+        /**
+         * @brief Prepare encoder and parse header data.
+         *
+         * @param in_buf Buffer representing the header of qoi image.
+         *
+         * This function returns
+         * - `Error::Empty` if the length of the `in_buf` is zero,
+         * - `Error::TooShort` if the length of the buffer is less than header length,
+         * - `Error::TooBig` if the image is too big to process,
+         * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value, or
+         * - `Error::AlreadyInitialized` if the encoder is already initialized.
+         */
+        Result<Desc> initialize(ByteCSpan in_buf) noexcept;
 
         /**
          * @brief Encode the pixel data into out.
          *
          * @param out The output buffer.
-         * @param in Input pixels.
+         * @param in Input pixels in bytes.
          * @return StreamResult with `processed` field set to number of bytes processed and `written` as
-         * number of pixels written into `out`.
+         * number of bytes written into `out`.
+         *
+         * The length of `out_buf` must be at least 4 bytes for RGBA and 3 bytes for RGB.
+         *
+         * This function returns
+         * - `Error::Empty` if the length of the `out_buf` or `in_buf` is zero,
+         * - `Error::TooShort` if the length of the buffer is less than 4 (RGBA) or 3 (RGB), or
+         * - `Error::NotInitialized` if the encoder is not initialized.
          */
-        StreamResult decode(ByteSpan out, ByteCSpan in) noexcept;
+        Result<StreamResult> decode(ByteSpan out_buf, ByteCSpan in_buf) noexcept;
 
         /**
-         * @brief Reset the state of the encoder to initial state.
+         * @brief Drain remaining `OP_RUN` count if exist.
+         *
+         * @param out_buf Output buffer.
+         * @return Number of written bytes.
+         *
+         * You might need to call this function multiple times if your buffer is not enough to drain the all
+         * of the instruction. `OP_RUN` can produce at most 62 pixels, so that would be 186 bytes for RGB and
+         * 248 bytes for RGBA. You can check whether the stored run count is non-zero using `has_run_count`.
+         *
+         * This function returns
+         * - `Error::Empty` if the length of the `out_buf` is zero, or
+         * - `Error::NotInitialized` if the encoder is not initialized.
          */
-        void reset();
+        Result<std::size_t> drain(ByteSpan out_buf) noexcept;
+
+        /**
+         * @brief Reset the internal state of the decoder.
+         *
+         * You are required to call this function to reset the internal state of the decoder. This function
+         * will do nothing if the encoder is not initialized.
+         */
+        void reset() noexcept;
+
+        /**
+         * @brief Check whether an `OP_RUN` count stored is non-zero.
+         */
+        bool has_run_count() const noexcept { return m_run > 0; }
+
+        /**
+         * @brief Check if encoder is already initialized.
+         */
+        bool is_initialized() const noexcept { return m_channels.has_value(); }
 
     private:
         using RunningArray = PixelArr<constants::running_array_size>;
 
-        Channels     m_channels;
-        Byte         m_run;
-        Pixel        m_prev;
-        RunningArray m_seen;
+        std::optional<Channels> m_channels;
+        Byte                    m_run;
+        Pixel                   m_prev;
+        RunningArray            m_seen;
     };
 }
 
