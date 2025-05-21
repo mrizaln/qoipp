@@ -105,12 +105,13 @@ namespace qoipp
     using Result = std::expected<T, Error>;
 #else
     template <typename T>
-    class Result
+    class [[nodiscard]] Result
     {
     public:
         Result() = default;
 
         template <typename TT>
+            requires std::constructible_from<T, TT> or std::same_as<std::decay_t<TT>, Error>
         Result(TT&& tt)
             : m_variant{ std::forward<TT>(tt) }
         {
