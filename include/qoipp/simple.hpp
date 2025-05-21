@@ -103,8 +103,8 @@ namespace qoipp
      * This function returns
      * - `Error::Empty` if the length of the data is zero,
      * - `Error::TooBig` if the image is too big to process,
-     * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value,
-     * - `Error::MismatchedDesc` if the number of pixel data doesn't match the image description, or
+     * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value, or
+     * - `Error::MismatchedDesc` if the number of pixel data doesn't match the image description.
      */
     Result<EncodeStatus> encode_into(ByteSpan out_buf, ByteCSpan in_data, Desc desc);
 
@@ -129,8 +129,8 @@ namespace qoipp
      * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
      *
      * This function returns
-     * - `Error::TooBig` if the image is too big to process,
-     * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value, or
+     * - `Error::TooBig` if the image is too big to process, or
+     * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value.
      */
     Result<EncodeStatus> encode_into(ByteSpan out_buf, PixelGenFun in_func, Desc desc);
 

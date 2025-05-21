@@ -158,9 +158,6 @@ namespace qoipp::impl
                         out.write(pixel_index++, prev_pixel);
                     }
                     --pixel_index;
-                    if (pixel_index >= width * height) {
-                        break;
-                    }
                     continue;
                 } break;
                 default: [[unlikely]] /* invalid tag (is this even possible?)*/;
