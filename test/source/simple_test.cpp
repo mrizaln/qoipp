@@ -1,8 +1,6 @@
 #include "util.hpp"
 
 #include <qoipp/simple.hpp>
-#define QOI_IMPLEMENTATION
-#include <qoi.h>
 
 #if defined(__cpp_lib_expected)
 static_assert(std::same_as<qoipp::Result<int>, std::expected<int, qoipp::Error>>);
@@ -18,65 +16,11 @@ namespace ut = boost::ut;
 namespace rr = ranges;
 namespace rv = ranges::views;
 
-Image qoi_encode(const Image& image)
-{
-    auto desc = qoi_desc{
-        .width      = static_cast<unsigned int>(image.desc.width),
-        .height     = static_cast<unsigned int>(image.desc.height),
-        .channels   = static_cast<unsigned char>(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = static_cast<unsigned char>(
-            image.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR
-        ),
-    };
-
-    int   len;
-    auto* data = qoi_encode(image.data.data(), &desc, &len);
-    if (!data) {
-        throw std::runtime_error{ "Error encoding image (qoi)" };
-    }
-
-    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
-
-    auto result = Image{
-        .data = ByteVec{ byte_ptr, byte_ptr + len },
-        .desc = image.desc,
-    };
-
-    QOI_FREE(data);
-    return result;
-}
-
-Image qoi_decode(const ByteCSpan image)
-{
-    qoi_desc desc;
-    auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
-
-    if (!data) {
-        throw std::runtime_error{ "Error decoding image (qoi)" };
-    }
-
-    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
-    auto  size     = static_cast<size_t>(desc.width * desc.height * desc.channels);
-
-    auto result = Image{
-        .data = { byte_ptr, byte_ptr + size },
-        .desc = {
-            .width      = desc.width,
-            .height     = desc.height,
-            .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-            .colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
-        },
-    };
-
-    QOI_FREE(data);
-    return result;
-}
-
 int main()
 {
     using namespace ut::literals;
     using namespace ut::operators;
-    using ut::expect, ut::that;
+    using ut::expect, ut::test, ut::that;
 
     // this number is chosen seems it happen both test images have this as a valid chunk boundary
     constexpr auto chunk_boundary = 1007u;
@@ -160,7 +104,7 @@ int main()
             expect(that % count == chunk_boundary);
             expect(rr::equal(buffer, rv::take(qoi, chunk_boundary)))
                 << "image should partially encoded\n"
-                << util::compare(buffer, rv::take(qoi, chunk_boundary));
+                << util::lazy_compare(buffer, rv::take(qoi, chunk_boundary));
         };
     } | simple_cases;
 
@@ -195,7 +139,7 @@ int main()
             expect(that % count == chunk_boundary);
             expect(rr::equal(buffer, rv::take(qoi, chunk_boundary)))
                 << "image should partially encoded\n"
-                << util::compare(buffer, rv::take(qoi, chunk_boundary));
+                << util::lazy_compare(buffer, rv::take(qoi, chunk_boundary));
         };
     } | simple_cases;
 
@@ -239,7 +183,7 @@ int main()
         const auto [decoded, actualdesc] = qoipp::decode(qoi).value();
         expect(actualdesc == desc);
         expect(that % decoded.size() == raw.size());
-        expect(rr::equal(decoded, raw)) << util::compare(raw, decoded);
+        expect(rr::equal(decoded, raw)) << util::lazy_compare(raw, decoded);
     } | simple_cases;
 
     "simple image decode wants RGB"_test = [&](auto&& input) {
@@ -251,7 +195,7 @@ int main()
         const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGB).value();
         expect(actualdesc == rgb_desc);
         expect(that % decoded.size() == rgb_image.size());
-        expect(rr::equal(decoded, rgb_image)) << util::compare(rgb_image, decoded);
+        expect(rr::equal(decoded, rgb_image)) << util::lazy_compare(rgb_image, decoded);
     } | simple_cases;
 
     "simple image decode wants RGBA"_test = [&](auto&& input) {
@@ -263,7 +207,7 @@ int main()
         const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGBA).value();
         expect(actualdesc == rgba_desc);
         expect(that % decoded.size() == rgba_image.size());
-        expect(rr::equal(decoded, rgba_image)) << util::compare(rgba_image, decoded);
+        expect(rr::equal(decoded, rgba_image)) << util::lazy_compare(rgba_image, decoded);
     } | simple_cases;
 
     "image decode into buffer"_test = [&](auto&& input) {
@@ -276,7 +220,7 @@ int main()
 
         expect(actualdesc == desc);
         expect(that % decoded.size() == raw.size());
-        expect(rr::equal(decoded, raw)) << util::compare(raw, decoded);
+        expect(rr::equal(decoded, raw)) << util::lazy_compare(raw, decoded);
     } | simple_cases;
 
     "image decode into function"_test = [&](auto&& input) {
@@ -295,7 +239,7 @@ int main()
 
         expect(actualdesc == desc);
         expect(that % result.size() == raw.size());
-        expect(rr::equal(result, raw)) << util::compare(raw, result);
+        expect(rr::equal(result, raw)) << util::lazy_compare(raw, result);
     } | simple_cases;
 
     "image encode to and decode from file"_test = [&](auto&& input) {
@@ -316,7 +260,7 @@ int main()
         expect(ut::nothrow([&] { decoded = qoipp::decode(qoifile).value(); }));
         expect(decoded.desc == desc);
         expect(that % decoded.data.size() == raw.size());
-        expect(rr::equal(decoded.data, raw)) << util::compare(raw, decoded.data);
+        expect(rr::equal(decoded.data, raw)) << util::lazy_compare(raw, decoded.data);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         expect(fs::is_empty(qoifile));
@@ -387,31 +331,33 @@ int main()
     }
 
     for (auto entry : fs::directory_iterator{ util::test_image_dir }) {
-        if (entry.path().extension() == ".png") {
-            fmt::print("Testing encode on '{}'\n", entry.path().filename());
+        const auto path = entry.path();
 
-            "png images round trip test compared to reference"_test = [&] {
-                const auto image       = util::load_image_stb(entry.path());
-                const auto qoi_image   = qoi_encode(image);
+        if (path.extension() == ".png") {
+            fmt::println("Testing encode on '{}'", path.filename());
+            test("png images round trip test compared to reference" + path.filename().string()) = [&] {
+                const auto image       = util::load_image_stb(path);
+                const auto qoi_image   = util::qoi_encode(image);
                 const auto qoipp_image = qoipp::encode(image.data, image.desc).value();
 
                 expect(that % qoi_image.data.size() == qoipp_image.size());
                 expect(qoi_image.desc == image.desc);
-                expect(rr::equal(qoi_image.data, qoipp_image)) << util::compare(qoi_image.data, qoipp_image);
+                expect(rr::equal(qoi_image.data, qoipp_image))
+                    << util::lazy_compare(qoi_image.data, qoipp_image, 32, 1);
             };
         }
-        if (entry.path().extension() == ".qoi") {
-            fmt::print("Testing decode on '{}'\n", entry.path().filename());
+        if (path.extension() == ".qoi") {
+            fmt::println("Testing encode on '{}'", path.filename());
+            test("qoipp decode compared to reference" + path.filename().string()) = [&] {
+                auto qoi_image = util::read_file(path);
 
-            "qoipp decode compared to reference"_test = [&] {
-                auto qoi_image = util::read_file(entry.path());
-
-                const auto [raw_image_ref, desc_ref] = qoi_decode(qoi_image);
-                const auto [raw_image, desc]         = qoipp::decode(entry.path()).value();
+                const auto [raw_image_ref, desc_ref] = util::qoi_decode(qoi_image);
+                const auto [raw_image, desc]         = qoipp::decode(path).value();
 
                 expect(that % raw_image_ref.size() == raw_image.size());
                 expect(desc_ref == desc);
-                expect(rr::equal(raw_image_ref, raw_image)) << util::compare(raw_image_ref, raw_image);
+                expect(rr::equal(raw_image_ref, raw_image))
+                    << util::lazy_compare(raw_image_ref, raw_image, 32, 1);
             };
         }
     }
