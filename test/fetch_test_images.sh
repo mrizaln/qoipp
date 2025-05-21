@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 
-wget https://qoiformat.org/qoi_test_images.zip
+wget -P resources/ https://qoiformat.org/qoi_test_images.zip
+cd resources/
 unzip qoi_test_images.zip
