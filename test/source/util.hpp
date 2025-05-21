@@ -96,7 +96,7 @@ namespace util
         return image;
     }
 
-    inline std::string compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 32)
+    inline std::string compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 1, int num_chunks = 32)
     {
         auto to_span = [](auto&& r) { return qoipp::ByteCSpan{ r.begin(), r.end() }; };
 
@@ -109,67 +109,40 @@ namespace util
             return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
         });
 
-        auto buffer = std::string{ '\n' };
-        auto out    = std::back_inserter(buffer);
-
-        const auto red   = fg(fmt::color::orange_red);
-        const auto green = fg(fmt::color::green_yellow);
-
-        auto prev_common = false;
-
-        for (auto [elem, info] : ses.get()) {
-            using E = dtl_modern::SesEdit;
-            switch (info.m_type) {
-            case E::Common: {
-                if (not prev_common) {
-                    prev_common = true;
-                    fmt::format_to(out, "...\n");
-                }
-            } break;
-            case E::Delete: {
-                auto offset = elem.begin() - lhs.begin();
-                prev_common = false;
-                auto joined = fmt::join(elem, " ");
-                fmt::format_to(out, red, "{:06x}: {:02x}\n", offset, joined);
-            } break;
-            case E::Add: {
-                auto offset = elem.begin() - rhs.begin();
-                prev_common = false;
-                auto joined = fmt::join(elem, " ");
-                fmt::format_to(out, green, "{:06x}: {:02x}\n", offset, joined);
-            } break;
-            }
-        }
-
-        return buffer;
-    }
-
-    inline std::string compare_detail(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 32)
-    {
-        auto [lcs, ses, edit_dist] = dtl_modern::diff(lhs, rhs);
-
-        auto buffer = std::string{ '\n' };
+        auto buffer = std::string{};
         auto out    = std::back_inserter(buffer);
 
         const auto red   = bg(fmt::color::dark_red);
         const auto green = bg(fmt::color::dark_green);
         const auto gray  = fg(fmt::color::gray);
 
-        auto count = 0;
+        fmt::format_to(out, "\n{:>4}  ", "");
+        for (auto i : rv::iota(0, num_chunks)) {
+            fmt::format_to(out, "{:>{}} ", i, chunk * 2);
+        }
 
-        for (auto [elem, info] : ses.get()) {
-            using E = dtl_modern::SesEdit;
+        for (auto count = 0; auto [elem, info] : ses.get()) {
+            if (count % num_chunks == 0) {
+                out = '\n';
+                fmt::format_to(out, "{:>4}: ", count / num_chunks);
+            }
+
+            using E     = dtl_modern::SesEdit;
+            auto joined = fmt::join(elem, "");
             switch (info.m_type) {
-            case E::Common: fmt::format_to(out, gray, "{:02x} ", elem); break;
-            case E::Delete: fmt::format_to(out, red, "{:02x} ", elem); break;
-            case E::Add: fmt::format_to(out, green, "{:02x} ", elem); break;
+            case E::Common: fmt::format_to(out, gray, "{:02x} ", joined); break;
+            case E::Delete: fmt::format_to(out, red, "{:02x} ", joined); break;
+            case E::Add: fmt::format_to(out, green, "{:02x} ", joined); break;
             }
-            if (++count == chunk) {
-                count = 0;
-                out   = '\n';
-            }
+
+            ++count;
         }
 
         return buffer;
+    }
+
+    inline auto lazy_compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 1, int num_chunks = 32)
+    {
+        return [=] { return compare(lhs, rhs, chunk, num_chunks); };
     }
 }
