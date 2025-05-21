@@ -4,8 +4,6 @@
 #include "util.hpp"
 
 #include <cassert>
-#include <format>
-#include <iostream>
 #include <utility>
 
 namespace qoipp::impl
@@ -334,7 +332,7 @@ namespace qoipp
             return make_error<StreamResult>(Error::NotInitialized);
         } else if (out_buf.size() == 0) {
             return make_error<StreamResult>(Error::Empty);
-        } else if (out_buf.size() < constants::header_size) {
+        } else if (out_buf.size() < static_cast<u8>(*m_channels)) {
             return make_error<StreamResult>(Error::TooShort);
         }
 
@@ -350,23 +348,24 @@ namespace qoipp
             out_px_idx = count / static_cast<u8>(*m_channels);
         }
 
-        auto tag       = util::Tag{};
         auto last_read = 0u;
 
-        while (true) {
+        // NOTE: I spent an ungodly amount of time debugging why this loop doesn't work, it turns out you
+        // can't break out of loop from a switch-case using break, that's why I used goto. fuck C!!!
+        while (reader.ok() and writer.ok()) {
             auto may_tag = reader.read_one();
             if (not may_tag) {
                 break;
             }
             last_read = 1;
-            tag       = static_cast<util::Tag>(*may_tag);
             auto curr = m_prev;
 
-            switch (tag) {
+            switch (auto tag = static_cast<util::Tag>(*may_tag); tag) {
             case util::Tag::OP_RGB: {
                 auto arr = reader.read_three();
                 if (not arr) {
-                    break;
+                    reader.decr(last_read);
+                    goto exit_loop;
                 }
                 last_read += arr->size();
 
@@ -377,7 +376,8 @@ namespace qoipp
             case util::Tag::OP_RGBA: {
                 auto arr = reader.read_four();
                 if (not arr) {
-                    break;
+                    reader.decr(last_read);
+                    goto exit_loop;
                 }
                 last_read += arr->size();
 
@@ -404,7 +404,8 @@ namespace qoipp
                 case util::Tag::OP_LUMA: {
                     const auto red_blue = reader.read_one();
                     if (not red_blue) {
-                        break;
+                        reader.decr(last_read);
+                        goto exit_loop;
                     }
                     last_read += 1;
 
@@ -419,14 +420,13 @@ namespace qoipp
                 case util::Tag::OP_RUN: {
                     m_run     = static_cast<u8>((tag & 0b00111111) - constants::bias_op_run);
                     last_read = 0;    // since run stored independently, no need to backtrack if write fail
-                    while (m_run > 0 and writer.ok()) {
+                    while (m_run > 0) {
+                        writer.write(out_px_idx, m_prev);
+                        if (not writer.ok()) {
+                            break;
+                        }
+                        ++out_px_idx;
                         --m_run;
-                        writer.write(out_px_idx++, m_prev);
-                    }
-                    if (not writer.ok()) {
-                        --out_px_idx;
-                        ++m_run;
-                        break;
                     }
                     continue;
                 } break;
@@ -434,16 +434,18 @@ namespace qoipp
                 }
             }
 
-            writer.write(out_px_idx++, curr);
+            writer.write(out_px_idx, curr);
             if (not writer.ok()) {
                 break;
             }
+
             m_prev = m_seen[util::hash(curr) % constants::running_array_size] = curr;
+            ++out_px_idx;
         }
+    exit_loop:
 
         if (not writer.ok()) {
             reader.decr(last_read);
-            --out_px_idx;
         }
 
         return StreamResult{ reader.count(), out_px_idx * static_cast<u8>(*m_channels) };
