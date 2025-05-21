@@ -10,7 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_COLOR_DIAGNOSTICS ON) # You might want to enable this (CMake 3.24+)
 
 find_package(fmt REQUIRED)
-find_package(ut REQUIRED)
+# find_package(ut REQUIRED)
 find_package(range-v3 REQUIRED)
 find_package(stb REQUIRED)
 
