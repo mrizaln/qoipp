@@ -1,8 +1,6 @@
 #include "util.hpp"
 
 #include <qoipp/simple.hpp>
-#define QOI_IMPLEMENTATION
-#include <qoi.h>
 
 #if defined(__cpp_lib_expected)
 static_assert(std::same_as<qoipp::Result<int>, std::expected<int, qoipp::Error>>);
@@ -17,60 +15,6 @@ namespace fs = std::filesystem;
 namespace ut = boost::ut;
 namespace rr = ranges;
 namespace rv = ranges::views;
-
-Image qoi_encode(const Image& image)
-{
-    auto desc = qoi_desc{
-        .width      = static_cast<unsigned int>(image.desc.width),
-        .height     = static_cast<unsigned int>(image.desc.height),
-        .channels   = static_cast<unsigned char>(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
-        .colorspace = static_cast<unsigned char>(
-            image.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR
-        ),
-    };
-
-    int   len;
-    auto* data = qoi_encode(image.data.data(), &desc, &len);
-    if (!data) {
-        throw std::runtime_error{ "Error encoding image (qoi)" };
-    }
-
-    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
-
-    auto result = Image{
-        .data = ByteVec{ byte_ptr, byte_ptr + len },
-        .desc = image.desc,
-    };
-
-    QOI_FREE(data);
-    return result;
-}
-
-Image qoi_decode(const ByteCSpan image)
-{
-    qoi_desc desc;
-    auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
-
-    if (!data) {
-        throw std::runtime_error{ "Error decoding image (qoi)" };
-    }
-
-    auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
-    auto  size     = static_cast<size_t>(desc.width * desc.height * desc.channels);
-
-    auto result = Image{
-        .data = { byte_ptr, byte_ptr + size },
-        .desc = {
-            .width      = desc.width,
-            .height     = desc.height,
-            .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
-            .colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
-        },
-    };
-
-    QOI_FREE(data);
-    return result;
-}
 
 int main()
 {
@@ -393,7 +337,7 @@ int main()
             fmt::println("Testing encode on '{}'", path.filename());
             test("png images round trip test compared to reference" + path.filename().string()) = [&] {
                 const auto image       = util::load_image_stb(path);
-                const auto qoi_image   = qoi_encode(image);
+                const auto qoi_image   = util::qoi_encode(image);
                 const auto qoipp_image = qoipp::encode(image.data, image.desc).value();
 
                 expect(that % qoi_image.data.size() == qoipp_image.size());
@@ -407,7 +351,7 @@ int main()
             test("qoipp decode compared to reference" + path.filename().string()) = [&] {
                 auto qoi_image = util::read_file(path);
 
-                const auto [raw_image_ref, desc_ref] = qoi_decode(qoi_image);
+                const auto [raw_image_ref, desc_ref] = util::qoi_decode(qoi_image);
                 const auto [raw_image, desc]         = qoipp::decode(path).value();
 
                 expect(that % raw_image_ref.size() == raw_image.size());

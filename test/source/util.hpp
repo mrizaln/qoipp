@@ -7,6 +7,9 @@
 #define STBI_NO_LINEAR
 #include <stb_image.h>
 
+#define QOI_IMPLEMENTATION
+#include <qoi.h>
+
 #include <boost/ut.hpp>
 #include <dtl_modern/dtl_modern.hpp>
 #include <fmt/color.h>
@@ -94,6 +97,60 @@ namespace util
 
         stbi_image_free(data);
         return image;
+    }
+
+    inline qoipp::Image qoi_encode(const qoipp::Image& image)
+    {
+        auto desc = qoi_desc{
+            .width      = static_cast<unsigned int>(image.desc.width),
+            .height     = static_cast<unsigned int>(image.desc.height),
+            .channels   = static_cast<unsigned char>(image.desc.channels == qoipp::Channels::RGB ? 3 : 4),
+            .colorspace = static_cast<unsigned char>(
+                image.desc.colorspace == qoipp::Colorspace::sRGB ? QOI_SRGB : QOI_LINEAR
+            ),
+        };
+
+        int   len;
+        auto* data = qoi_encode(image.data.data(), &desc, &len);
+        if (!data) {
+            throw std::runtime_error{ "Error encoding image (qoi)" };
+        }
+
+        auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
+
+        auto result = qoipp::Image{
+            .data = qoipp::ByteVec{ byte_ptr, byte_ptr + len },
+            .desc = image.desc,
+        };
+
+        QOI_FREE(data);
+        return result;
+    }
+
+    inline qoipp::Image qoi_decode(const qoipp::ByteCSpan image)
+    {
+        qoi_desc desc;
+        auto*    data = qoi_decode(image.data(), (int)image.size(), &desc, 0);
+
+        if (!data) {
+            throw std::runtime_error{ "Error decoding image (qoi)" };
+        }
+
+        auto* byte_ptr = reinterpret_cast<std::uint8_t*>(data);
+        auto  size     = static_cast<size_t>(desc.width * desc.height * desc.channels);
+
+        auto result = qoipp::Image{
+        .data = { byte_ptr, byte_ptr + size },
+        .desc = {
+            .width      = desc.width,
+            .height     = desc.height,
+            .channels   = desc.channels == 3 ? qoipp::Channels::RGB : qoipp::Channels::RGBA,
+            .colorspace = desc.colorspace == QOI_SRGB ? qoipp::Colorspace::sRGB : qoipp::Colorspace::Linear,
+        },
+    };
+
+        QOI_FREE(data);
+        return result;
     }
 
     inline std::string compare(qoipp::ByteCSpan lhs, qoipp::ByteCSpan rhs, int chunk = 1, int num_chunks = 32)
