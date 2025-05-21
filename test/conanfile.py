@@ -7,7 +7,7 @@ class Recipe(ConanFile):
     generators = ["CMakeToolchain", "CMakeDeps"]
     requires = [
         "fmt/10.2.1",
-        "boost-ext-ut/1.1.9",
+        # "boost-ext-ut/2.1.0",       # outdated
         "range-v3/0.12.0",
         "stb/cci.20230920",
     ]
