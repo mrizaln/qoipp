@@ -281,7 +281,7 @@ namespace qoipp::util
         {
             const auto offset = index * static_cast<usize>(channels);
             if constexpr (Checked) {
-                if (offset >= dest.size() + static_cast<u32>(channels) - 1) {
+                if (offset + static_cast<u32>(channels) - 1 >= dest.size()) {
                     out_of_bound = true;
                     return;
                 }
