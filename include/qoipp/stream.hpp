@@ -147,7 +147,7 @@ namespace qoipp
          * - `Error::Empty` if the length of the `out_buf` is zero, or
          * - `Error::NotInitialized` if the encoder is not initialized.
          */
-        Result<std::size_t> drain(ByteSpan out_buf) noexcept;
+        Result<std::size_t> drain_run(ByteSpan out_buf) noexcept;
 
         /**
          * @brief Reset the internal state of the decoder.

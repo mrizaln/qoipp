@@ -132,7 +132,7 @@ int main()
             }
 
             while (decoder.has_run_count()) {
-                auto count = decoder.drain(out).value();
+                auto count = decoder.drain_run(out).value();
                 decoded.insert(decoded.end(), out.begin(), out.begin() + count);
             }
 
@@ -234,7 +234,7 @@ int main()
                     }
 
                     while (decoder.has_run_count()) {
-                        auto count = decoder.drain(out).value();
+                        auto count = decoder.drain_run(out).value();
                         raw_image.insert(raw_image.end(), out.begin(), out.begin() + count);
                     }
 
