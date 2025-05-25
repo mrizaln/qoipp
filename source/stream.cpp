@@ -16,34 +16,15 @@ namespace qoipp::impl
         {
         }
 
-        std::optional<u8> read_one()
+        // return empty span if out of bound
+        ByteCSpan read(u32 num)
         {
-            if (not can_read(m_index)) {
-                return std::nullopt;
+            if (not can_read(m_index + num - 1)) {
+                return {};
             }
-            return m_bytes[m_index++];
-        }
-
-        std::optional<ByteArr<3>> read_three()
-        {
-            if (not can_read(m_index + 3 - 1)) {
-                return std::nullopt;
-            }
-            auto idx  = m_index;
-            auto arr  = ByteArr{ m_bytes[idx], m_bytes[idx + 1], m_bytes[idx + 2] };
-            m_index  += 3;
-            return arr;
-        }
-
-        std::optional<ByteArr<4>> read_four()
-        {
-            if (not can_read(m_index + 4 - 1)) {
-                return std::nullopt;
-            }
-            auto idx  = m_index;
-            auto arr  = ByteArr{ m_bytes[idx], m_bytes[idx + 1], m_bytes[idx + 2], m_bytes[idx + 3] };
-            m_index  += 4;
-            return arr;
+            auto span  = m_bytes.subspan(m_index, num);
+            m_index   += num;
+            return span;
         }
 
         void decr(usize amount)
@@ -336,55 +317,56 @@ namespace qoipp
             return make_error<StreamResult>(Error::TooShort);
         }
 
-        auto reader     = impl::StreamByteReader{ in_buf };
-        auto writer     = util::SimplePixelWriter<true>{ out_buf, *m_channels };
-        auto out_px_idx = 0ul;
+        auto channels = static_cast<u8>(*m_channels);
+        auto write    = [&](Pixel pixel, u64 index) {
+            const auto off = index * channels;
+            std::memcpy(out_buf.data() + off, &pixel, channels);
+        };
 
-        if (has_run_count()) {
-            auto count = drain(out_buf).value();
-            if (has_run_count()) {    // incomplete write
-                return StreamResult{ 0, count };
+        auto reader = impl::StreamByteReader{ in_buf };
+
+        usize last_read   = 0u;
+        usize pixel_index = 0;
+
+        for (; pixel_index < out_buf.size() / channels; ++pixel_index) {
+            if (m_run > 0) {
+                --m_run;
+                write(m_prev, pixel_index);
+                continue;
             }
-            out_px_idx = count / static_cast<u8>(*m_channels);
-        }
 
-        auto last_read = 0u;
-
-        // NOTE: I spent an ungodly amount of time debugging why this loop doesn't work, it turns out you
-        // can't break out of loop from a switch-case using break, that's why I used goto. fuck C!!!
-        while (reader.ok() and writer.ok()) {
-            auto may_tag = reader.read_one();
-            if (not may_tag) {
+            auto may_tag = reader.read(1);
+            if (may_tag.empty()) {
                 break;
             }
-            last_read = 1;
+            last_read = may_tag.size();
             auto curr = m_prev;
 
-            switch (auto tag = static_cast<util::Tag>(*may_tag); tag) {
+            switch (auto tag = static_cast<util::Tag>(may_tag[0]); tag) {
             case util::Tag::OP_RGB: {
-                auto arr = reader.read_three();
-                if (not arr) {
+                auto arr = reader.read(3);
+                if (arr.empty()) {
                     reader.decr(last_read);
                     goto exit_loop;
                 }
-                last_read += arr->size();
+                last_read += arr.size();
 
-                curr.r = arr->at(0);
-                curr.g = arr->at(1);
-                curr.b = arr->at(2);
+                curr.r = arr[0];
+                curr.g = arr[1];
+                curr.b = arr[2];
             } break;
             case util::Tag::OP_RGBA: {
-                auto arr = reader.read_four();
-                if (not arr) {
+                auto arr = reader.read(4);
+                if (arr.empty()) {
                     reader.decr(last_read);
                     goto exit_loop;
                 }
-                last_read += arr->size();
+                last_read += arr.size();
 
-                curr.r = arr->at(0);
-                curr.g = arr->at(1);
-                curr.b = arr->at(2);
-                curr.a = arr->at(3);
+                curr.r = arr[0];
+                curr.g = arr[1];
+                curr.b = arr[2];
+                curr.a = arr[3];
             } break;
             default:
                 switch (tag & 0b11000000) {
@@ -402,16 +384,16 @@ namespace qoipp
                     curr.b = static_cast<u8>(db + m_prev.b);
                 } break;
                 case util::Tag::OP_LUMA: {
-                    const auto red_blue = reader.read_one();
-                    if (not red_blue) {
+                    const auto red_blue = reader.read(1);
+                    if (red_blue.empty()) {
                         reader.decr(last_read);
                         goto exit_loop;
                     }
-                    last_read += 1;
+                    last_read += red_blue.size();
 
                     const u8 dg    = (tag & 0b00111111) - constants::bias_op_luma_g;
-                    const u8 dr_dg = ((*red_blue & 0b11110000) >> 4) - constants::bias_op_luma_rb;
-                    const u8 db_dg = (*red_blue & 0b00001111) - constants::bias_op_luma_rb;
+                    const u8 dr_dg = ((red_blue[0] & 0b11110000) >> 4) - constants::bias_op_luma_rb;
+                    const u8 db_dg = (red_blue[0] & 0b00001111) - constants::bias_op_luma_rb;
 
                     curr.r = static_cast<u8>(dg + dr_dg + m_prev.r);
                     curr.g = static_cast<u8>(dg + m_prev.g);
@@ -420,38 +402,25 @@ namespace qoipp
                 case util::Tag::OP_RUN: {
                     m_run     = static_cast<u8>((tag & 0b00111111) - constants::bias_op_run);
                     last_read = 0;    // since run stored independently, no need to backtrack if write fail
-                    while (m_run > 0) {
-                        writer.write(out_px_idx, m_prev);
-                        if (not writer.ok()) {
-                            break;
-                        }
-                        ++out_px_idx;
-                        --m_run;
-                    }
-                    continue;
+                    --m_run;
                 } break;
                 default: [[unlikely]] /* invalid tag (is this even possible?)*/;
                 }
             }
 
-            writer.write(out_px_idx, curr);
-            if (not writer.ok()) {
-                break;
-            }
-
+            write(curr, pixel_index);
             m_prev = m_seen[util::hash(curr) % constants::running_array_size] = curr;
-            ++out_px_idx;
         }
     exit_loop:
 
-        if (not writer.ok()) {
+        if (pixel_index > out_buf.size()) {
             reader.decr(last_read);
         }
 
-        return StreamResult{ reader.count(), out_px_idx * static_cast<u8>(*m_channels) };
+        return StreamResult{ reader.count(), pixel_index * channels };
     }
 
-    Result<std::size_t> StreamDecoder::drain(ByteSpan out_buf) noexcept
+    Result<std::size_t> StreamDecoder::drain_run(ByteSpan out_buf) noexcept
     {
         if (not m_channels) {
             return make_error<std::size_t>(Error::NotInitialized);
