@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(example VERSION 0.0.1)
+project(example VERSION 0.5.0)
 
 include(cmake/prelude.cmake)
 include(cmake/mold.cmake)
