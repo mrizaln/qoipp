@@ -1,4 +1,5 @@
 #include <qoipp/simple.hpp>
+#include <qoipp/stream.hpp>
 #define QOI_IMPLEMENTATION
 #include <fpng.h>
 #include <qoi.h>
@@ -16,12 +17,16 @@
 #include <fmt/core.h>
 #include <fmt/std.h>
 
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <exception>
 #include <filesystem>
 #include <limits>
 #include <string>
 #include <utility>
+
+std::atomic<bool> g_interrupt = false;
 
 namespace fs = std::filesystem;
 
@@ -57,13 +62,14 @@ namespace lib
         qoi,
         qoixx,
         qoipp,
+        qoipp2,
         stb,
         fpng,
     };
 
     std::map<Lib, std::string_view> names = {
-        { Lib::none, "none" },   { Lib::qoi, "qoi" }, { Lib::qoixx, "qoixx" },
-        { Lib::qoipp, "qoipp" }, { Lib::stb, "stb" }, { Lib::fpng, "fpng" },
+        { Lib::none, "none" },     { Lib::qoi, "qoi" }, { Lib::qoixx, "qoixx" }, { Lib::qoipp, "qoipp" },
+        { Lib::qoipp2, "qoipp2" }, { Lib::stb, "stb" }, { Lib::fpng, "fpng" },
     };
 };
 
@@ -469,7 +475,39 @@ EncodeResult<> qoipp_encode(const RawImage& image)
     auto duration = Clock::now() - timepoint;
 
     return {
-        .image = { buffer, image.desc },
+        .image = { std::move(buffer), image.desc },
+        .time  = duration,
+    };
+}
+
+EncodeResult<> qoipp_stream_encode(const RawImage& image)
+{
+    auto timepoint = Clock::now();
+
+    auto encoder = qoipp::StreamEncoder{};
+    auto buffer  = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
+
+    if (not encoder.initialize(buffer, image.desc)) {
+        throw std::runtime_error{ "failed to initialize encoder" };
+    }
+
+    auto off = qoipp::constants::header_size;
+    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), image.data.size() - off) };
+    auto res = encoder.encode(buffer, in);
+    assert(res.has_value());
+
+    auto size       = res->written;
+    auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
+    buffer.resize(size + additional);
+
+    if (not encoder.finalize({ buffer.data() + size, additional })) {
+        throw std::runtime_error{ "failed to finalize encoder" };
+    }
+
+    auto duration = Clock::now() - timepoint;
+
+    return {
+        .image = { std::move(buffer), image.desc },
         .time  = duration,
     };
 }
@@ -484,7 +522,40 @@ DecodeResult qoipp_decode(const QoiImage& image)
     auto duration    = Clock::now() - timepoint;
 
     return {
-        .image = { buffer, desc },
+        .image = { std::move(buffer), desc },
+        .time  = duration,
+    };
+}
+
+DecodeResult qoipp_stream_decode(const QoiImage& image)
+{
+    auto timepoint = Clock::now();
+
+    auto decoder = qoipp::StreamDecoder{};
+    auto buffer  = qoipp::ByteVec(qoipp::count_bytes(image.desc).value());
+
+    auto desc = decoder.initialize({ image.data.data(), qoipp::constants::header_size }).value();
+
+    auto off = qoipp::constants::header_size;
+    auto end = image.data.size() - qoipp::constants::end_marker_size;
+
+    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), end - off) };
+    auto res = decoder.decode(buffer, in);
+    assert(res.has_value());
+
+    auto write = res->written;
+    while (decoder.has_run_count()) {
+        auto out    = qoipp::ByteSpan{ buffer.begin() + write, buffer.end() };
+        auto count  = decoder.drain_run(out).value();
+        write      += count;
+    }
+
+    decoder.reset();
+
+    auto duration = Clock::now() - timepoint;
+
+    return {
+        .image = { std::move(buffer), desc },
         .time  = duration,
     };
 }
@@ -675,7 +746,11 @@ BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const
         }
     }
 
-    auto benchmark_impl = [&](auto func, const auto& image) {
+    auto benchmark_impl = [&](auto func, const auto& image) -> std::pair<Duration, std::size_t> {
+        if (g_interrupt) {
+            return { Duration::zero(), 0 };
+        }
+
         auto [_, time] = func(image);
         if (opt.warmup) {
             for (auto i = 0; i < 3; ++i) {
@@ -685,13 +760,13 @@ BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const
 
         auto        total = Duration::zero();
         std::size_t size  = 0;
-        for (auto run = opt.runs; run-- > 0;) {
+        for (auto run = opt.runs; run-- > 0 and g_interrupt == false;) {
             auto [coded, time]  = func(image);
             total              += time;
             size                = coded.data.size();
         }
 
-        return std::make_pair(total / opt.runs, size);
+        return { total / opt.runs, size };
     };
 
     // the benchmark starts here
@@ -720,6 +795,10 @@ BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const
             auto [qoipp_time, qoipp_size] = benchmark_impl(qoipp_encode, raw_image);
             result.libs_info[lib::Lib::qoipp].encode_time  = qoipp_time;
             result.libs_info[lib::Lib::qoipp].encoded_size = qoipp_size;
+
+            auto [qoipp2_time, qoipp2_size] = benchmark_impl(qoipp_stream_encode, raw_image);
+            result.libs_info[lib::Lib::qoipp2].encode_time  = qoipp2_time;
+            result.libs_info[lib::Lib::qoipp2].encoded_size = qoipp2_size;
         }
         if (opt.stb) {
             auto [stb_time, stb_size] = benchmark_impl(stb_encode, raw_image);
@@ -747,6 +826,9 @@ BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const
         if (opt.qoipp) {
             auto [qoipp_time, _] = benchmark_impl(qoipp_decode, qoi_image);
             result.libs_info[lib::Lib::qoipp].decode_time = qoipp_time;
+
+            auto [qoipp2_time, _] = benchmark_impl(qoipp_stream_decode, qoi_image);
+            result.libs_info[lib::Lib::qoipp2].decode_time = qoipp2_time;
         }
         if (opt.stb) {
             auto png_image_stb = stb_encode(raw_image).image;
@@ -784,6 +866,9 @@ std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Opt
         fmt::println(">> Benchmarking {} (recurse)...", path / "**/*.png");
 
         for (const auto& path : fs::recursive_directory_iterator{ path }) {
+            if (g_interrupt) {
+                break;
+            }
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
                 benchmark_file(path.path());
             }
@@ -792,6 +877,9 @@ std::vector<BenchmarkResult> benchmark_directory(const fs::path& path, const Opt
         fmt::println(">> Benchmarking {}...", path / "*.png");
 
         for (const auto& path : fs::directory_iterator{ path }) {
+            if (g_interrupt) {
+                break;
+            }
             if (fs::is_regular_file(path) && path.path().extension() == ".png") {
                 benchmark_file(path.path());
             }
@@ -839,6 +927,12 @@ BenchmarkResult average_results(std::span<const BenchmarkResult> results)
 
 int main(int argc, char* argv[])
 try {
+    std::signal(SIGINT, [](int /* sig */) {
+        g_interrupt.store(true);
+        g_interrupt.notify_all();
+        fmt::println("interrupt signal received!");
+    });
+
     auto app     = CLI::App{ "Qoibench - Benchmarking tool for QOI" };
     auto opt     = Options{};
     auto dirpath = fs::path{};
