@@ -43,6 +43,8 @@ endfunction()
 
 enable_testing()
 
+execute_process(COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/fetch_test_images.sh)
+
 create_test_exe(simple_test)
 create_test_exe(stream_test)
 
