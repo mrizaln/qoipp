@@ -288,7 +288,7 @@ namespace qoipp
     {
     }
 
-    Result<Desc> StreamDecoder::initialize(ByteCSpan in_buf) noexcept
+    Result<Desc> StreamDecoder::initialize(ByteCSpan in_buf, std::optional<Channels> target) noexcept
     {
         if (m_channels) {
             return make_error<Desc>(Error::AlreadyInitialized);
@@ -299,10 +299,13 @@ namespace qoipp
             if (auto bytes = count_bytes(*desc); not bytes) {
                 return make_error<Desc>(bytes.error());
             }
-            m_channels = desc->channels;
-        }
 
-        m_seen[util::hash(m_prev) % constants::running_array_size] = m_prev;
+            m_target       = target.value_or(desc->channels);
+            m_channels     = m_target;
+            desc->channels = m_channels.value();
+
+            m_seen[util::hash(m_prev) % constants::running_array_size] = m_prev;
+        }
 
         return desc;
     }
@@ -319,8 +322,9 @@ namespace qoipp
 
         auto channels = static_cast<u8>(*m_channels);
         auto write    = [&](Pixel pixel, u64 index) {
-            const auto off = index * channels;
-            std::memcpy(out_buf.data() + off, &pixel, channels);
+            const auto chan = static_cast<u8>(*m_target);
+            const auto off  = index * chan;
+            std::memcpy(out_buf.data() + off, &pixel, chan);
         };
 
         auto reader = impl::StreamByteReader{ in_buf };
@@ -447,6 +451,7 @@ namespace qoipp
     {
         if (m_channels.has_value()) {
             m_channels.reset();
+            m_target.reset();
             m_run  = 0;
             m_prev = constants::start;
             m_seen.fill(Pixel{});
