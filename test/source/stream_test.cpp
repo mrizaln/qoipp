@@ -1,6 +1,7 @@
 #include "util.hpp"
 
 #include <qoipp/stream.hpp>
+
 #include <random>
 
 using qoipp::Byte;
@@ -14,12 +15,111 @@ namespace ut = boost::ut;
 namespace rr = ranges;
 namespace rv = ranges::views;
 
+using namespace ut::literals;
+using namespace ut::operators;
+
+using ut::expect;
+using ut::fatal;
+using ut::test;
+using ut::that;
+
+using util::lazy_compare;
+
+struct TestCase
+{
+    qoipp::Desc desc;
+    ByteCSpan   raw;
+    ByteCSpan   qoi;
+    ByteCSpan   qoi_incomplete;
+};
+
+int to_int(qoipp::Channels chan)
+{
+    return static_cast<int>(chan);
+}
+
+// wrapper
+// -------
+ByteVec encode(
+    qoipp::Desc          desc,
+    ByteSpan             out_buffer,
+    ByteCSpan            input,
+    std::source_location loc = std::source_location::current()
+)
+{
+    auto encoder = qoipp::StreamEncoder{};
+    auto encoded = ByteVec(qoipp::constants::header_size);
+
+    auto res = encoder.initialize(encoded, desc);
+    expect(res.has_value(), loc) << "write header should successful" << fatal;
+
+    auto off = 0ul;
+    auto out = out_buffer;
+
+    while (off < input.size()) {
+        auto in  = ByteCSpan{ input.data() + off, std::min(out.size(), input.size() - off) };
+        auto res = encoder.encode(out, in);
+        expect(res.has_value(), loc) << "encode should successful" << fatal;
+
+        off += res->processed;
+        encoded.insert(encoded.end(), out.begin(), out.begin() + static_cast<long>(res->written));
+    }
+
+    auto size       = encoded.size();
+    auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
+    encoded.resize(size + additional);
+
+    auto fin_res = encoder.finalize({ encoded.data() + size, additional });
+    expect(fin_res.has_value(), loc) << "finalization should successful" << fatal;
+    expect(fin_res.value() == additional, loc) << "written at finalization should be the same" << fatal;
+
+    return encoded;
+}
+
+ByteVec decode(
+    qoipp::Desc                    ref_desc,
+    ByteSpan                       out_buffer,
+    ByteCSpan                      input,
+    std::optional<qoipp::Channels> target = std::nullopt,
+    std::source_location           loc    = std::source_location::current()
+)
+{
+    auto decoder = qoipp::StreamDecoder{};
+    auto decoded = ByteVec{};
+
+    if (target) {
+        ref_desc.channels = *target;
+    }
+
+    auto parsed_desc = decoder.initialize({ input.data(), qoipp::constants::header_size }, target).value();
+    expect(that % ref_desc == parsed_desc, loc) << "decoded desc should match the reference";
+
+    auto off = qoipp::constants::header_size;
+    auto out = out_buffer;
+
+    auto end = input.size() - qoipp::constants::end_marker_size;
+
+    while (off < end) {
+        auto in  = ByteCSpan{ input.data() + off, std::min(out.size(), end - off) };
+        auto res = decoder.decode(out, in);
+        expect(res.has_value(), loc) << "decode should be successful" << fatal;
+
+        off += res->processed;
+        decoded.insert(decoded.end(), out.begin(), out.begin() + static_cast<long>(res->written));
+    }
+
+    while (decoder.has_run_count()) {
+        auto count = decoder.drain_run(out).value();
+        decoded.insert(decoded.end(), out.begin(), out.begin() + static_cast<long>(count));
+    }
+
+    decoder.reset();    // just good hygiene
+    return decoded;
+}
+// -------
+
 int main()
 {
-    using namespace ut::literals;
-    using namespace ut::operators;
-    using ut::expect, ut::test, ut::that;
-
     // rgb
     // ---
     constexpr auto desc_3 = qoipp::Desc{
@@ -41,7 +141,12 @@ int main()
 #include "image_qoi_3_incomplete.txt"
     };
 
-    const auto test_case_3 = std::tie(desc_3, raw_image_3, qoi_image_3, qoi_image_incomplete_3);
+    const auto test_case_3 = TestCase{
+        .desc           = desc_3,
+        .raw            = raw_image_3,
+        .qoi            = qoi_image_3,
+        .qoi_incomplete = qoi_image_incomplete_3,
+    };
     // ---
 
     // rgba
@@ -65,86 +170,79 @@ int main()
 #include "image_qoi_4_incomplete.txt"
     };
 
-    const auto test_case_4 = std::tie(desc_4, raw_image_4, qoi_image_4, qoi_image_incomplete_4);
+    const auto test_case_4 = TestCase{
+        .desc           = desc_4,
+        .raw            = raw_image_4,
+        .qoi            = qoi_image_4,
+        .qoi_incomplete = qoi_image_incomplete_4,
+    };
     // ----
 
     const auto simple_cases = std::array{ test_case_3, test_case_4 };
 
     for (auto i = 5u; i <= 1024; ++i) {
-        test("stream encoder should be able to encode image | " + std::to_string(i)) = [&](auto&& input) {
+        test("stream encoder encode original | " + std::to_string(i)) = [&](TestCase input) {
             const auto& [desc, raw, qoi, _] = input;
 
-            fmt::println("encode start chan={} buf={}", static_cast<int>(desc.channels), i);
-
-            auto encoder = qoipp::StreamEncoder{};
-            auto encoded = ByteVec(qoipp::constants::header_size);
-
-            auto res = encoder.initialize(encoded, desc);
-            expect(res.has_value()) << "write header should successful";
-
-            auto off = 0ul;
-            auto out = ByteVec(i);
-
-            while (off < raw.size()) {
-                auto in  = ByteCSpan{ raw.data() + off, std::min(out.size(), raw.size() - off) };
-                auto res = encoder.encode(out, in);
-                expect(res.has_value()) << "encode should successful";
-
-                off += res->processed;
-                encoded.insert(encoded.end(), out.begin(), out.begin() + res->written);
-            }
-
-            auto size       = encoded.size();
-            auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
-            encoded.resize(size + additional);
-
-            encoder.finalize({ encoded.data() + size, additional });
+            auto buffer  = ByteVec(i);
+            auto encoded = encode(desc, buffer, raw);
 
             expect(that % qoi.size() == encoded.size());
-            expect(rr::equal(qoi, encoded)) << util::lazy_compare(qoi, encoded, 1, 32);
+            expect(rr::equal(qoi, encoded)) << lazy_compare(qoi, encoded, 1, 32);
         } | simple_cases;
     }
 
     for (auto i = 5u; i <= 1024; ++i) {
-        test("stream decoder should be able to decode image | " + std::to_string(i)) = [&](auto&& input) {
+        test("stream decoder decode original | " + std::to_string(i)) = [&](TestCase input) {
             const auto& [desc, raw, qoi, _] = input;
 
-            fmt::println("decode start chan={} | buf={}", static_cast<int>(desc.channels), i);
-
-            auto decoder = qoipp::StreamDecoder{};
-            auto decoded = ByteVec{};
-
-            auto parsed_desc = decoder.initialize({ qoi.data(), qoipp::constants::header_size }).value();
-            expect(desc == parsed_desc);
-
-            auto off = qoipp::constants::header_size;
-            auto out = ByteVec(i);
-
-            auto end = qoi.size() - qoipp::constants::end_marker_size;
-
-            while (off < end) {
-                auto in  = ByteCSpan{ qoi.data() + off, std::min(out.size(), end - off) };
-                auto res = decoder.decode(out, in);
-                expect(res.has_value()) << "decode should successful";
-
-                off += res->processed;
-                decoded.insert(decoded.end(), out.begin(), out.begin() + res->written);
-            }
-
-            while (decoder.has_run_count()) {
-                auto count = decoder.drain_run(out).value();
-                decoded.insert(decoded.end(), out.begin(), out.begin() + count);
-            }
-
-            decoder.reset();
+            auto buffer  = ByteVec(i);
+            auto decoded = decode(desc, buffer, qoi);
 
             expect(that % raw.size() == decoded.size());
-            expect(rr::equal(raw, decoded))
-                << util::lazy_compare(raw, decoded, static_cast<int>(desc.channels), 8);
+            expect(rr::equal(raw, decoded)) << lazy_compare(raw, decoded, to_int(desc.channels), 8);
+        } | simple_cases;
+
+        test("stream decoder decode to RGB | " + std::to_string(i)) = [&](TestCase input) {
+            const auto& [desc, raw, qoi, _] = input;
+
+            auto rgb_raw = desc.channels == qoipp::Channels::RGB ? ByteVec{ raw.begin(), raw.end() }
+                                                                 : util::to_rgb(raw);
+
+            auto buffer  = ByteVec(i);
+            auto decoded = decode(desc, buffer, qoi, qoipp::Channels::RGB);
+
+            expect(that % rgb_raw.size() == decoded.size());
+            expect(rr::equal(rgb_raw, decoded)) << lazy_compare(rgb_raw, decoded, to_int(desc.channels), 8);
+        } | simple_cases;
+
+        test("stream decoder decode to RGBA | " + std::to_string(i)) = [&](TestCase input) {
+            const auto& [desc, raw, qoi, _] = input;
+
+            auto rgba_raw = desc.channels == qoipp::Channels::RGBA    //
+                              ? ByteVec{ raw.begin(), raw.end() }
+                              : util::to_rgba(raw);
+
+            auto buffer  = ByteVec(i);
+            auto decoded = decode(desc, buffer, qoi, qoipp::Channels::RGBA);
+
+            expect(that % rgba_raw.size() == decoded.size());
+            expect(rr::equal(rgba_raw, decoded)) << lazy_compare(rgba_raw, decoded, to_int(desc.channels), 8);
+        } | simple_cases;
+
+        test("stream decoder decode incomplete (still work) | " + std::to_string(i)) = [&](TestCase input) {
+            const auto& [desc, raw, qoi, qoi_incomplete] = input;
+
+            auto buffer     = ByteVec(i);
+            auto decoded    = decode(desc, buffer, qoi_incomplete);
+            auto incomplete = raw.subspan(0, decoded.size());
+
+            expect(that % raw.size() != decoded.size());
+            expect(rr::equal(incomplete, decoded)) << lazy_compare(raw, decoded, to_int(desc.channels), 8);
         } | simple_cases;
     }
 
-    fmt::print("Testing on real images...\n");
+    fmt::println("Testing on real images...");
 
     if (!fs::exists(util::test_image_dir)) {
         fmt::println("Test image directory '{}' does not exist, skipping test", util::test_image_dir);
@@ -167,37 +265,15 @@ int main()
 
                     const auto& [raw, desc] = image;
 
-                    auto encoder     = qoipp::StreamEncoder{};
-                    auto qoipp_image = ByteVec(qoipp::constants::header_size);
-
-                    auto res = encoder.initialize(qoipp_image, desc);
-                    expect(res.has_value()) << "write header should successful";
-
-                    auto off = 0ul;
-
                     // randomize :D
-                    auto range = std::uniform_int_distribution{ 5ul, raw.size() - 1 };
-                    auto out   = ByteVec(range(rng));
-
-                    while (off < raw.size()) {
-                        auto in  = ByteCSpan{ raw.data() + off, std::min(out.size(), raw.size() - off) };
-                        auto res = encoder.encode(out, in);
-                        expect(res.has_value()) << "encode should successful";
-
-                        off += res->processed;
-                        qoipp_image.insert(qoipp_image.end(), out.begin(), out.begin() + res->written);
-                    }
-
-                    auto size       = qoipp_image.size();
-                    auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
-                    qoipp_image.resize(size + additional);
-
-                    encoder.finalize({ qoipp_image.data() + size, additional });
+                    auto range       = std::uniform_int_distribution{ 5ul, raw.size() - 1 };
+                    auto buffer      = ByteVec(range(rng));
+                    auto qoipp_image = encode(desc, buffer, raw);
 
                     expect(that % qoi_image.data.size() == qoipp_image.size());
-                    expect(qoi_image.desc == image.desc);
+                    expect(that % qoi_image.desc == image.desc);
                     expect(rr::equal(qoi_image.data, qoipp_image))
-                        << util::lazy_compare(qoi_image.data, qoipp_image, 32, 1);
+                        << lazy_compare(qoi_image.data, qoipp_image, 1, 32);
                 };
             }
         }
@@ -211,38 +287,15 @@ int main()
 
                     const auto [raw_image_ref, desc_ref] = util::qoi_decode(qoi);
 
-                    auto decoder   = qoipp::StreamDecoder{};
-                    auto raw_image = ByteVec{};
-
-                    auto desc = decoder.initialize({ qoi.data(), qoipp::constants::header_size }).value();
-                    expect(desc_ref == desc);
-
-                    auto end = qoi.size() - qoipp::constants::end_marker_size;
-                    auto off = qoipp::constants::header_size;
-
                     // randomize :D
-                    auto range = std::uniform_int_distribution{ 5ul, end - 1 };
-                    auto out   = ByteVec(range(rng));
-
-                    while (off < end) {
-                        auto in  = ByteCSpan{ qoi.data() + off, std::min(out.size(), end - off) };
-                        auto res = decoder.decode(out, in);
-                        expect(res.has_value()) << "decode should successful";
-
-                        off += res->processed;
-                        raw_image.insert(raw_image.end(), out.begin(), out.begin() + res->written);
-                    }
-
-                    while (decoder.has_run_count()) {
-                        auto count = decoder.drain_run(out).value();
-                        raw_image.insert(raw_image.end(), out.begin(), out.begin() + count);
-                    }
-
-                    decoder.reset();
+                    auto end       = qoi.size() - qoipp::constants::end_marker_size;
+                    auto range     = std::uniform_int_distribution{ 5ul, end - 1 };
+                    auto buffer    = ByteVec(range(rng));
+                    auto raw_image = decode(desc_ref, buffer, qoi);
 
                     expect(that % raw_image_ref.size() == raw_image.size());
                     expect(rr::equal(raw_image_ref, raw_image))
-                        << util::lazy_compare(raw_image_ref, raw_image, 32, 1);
+                        << lazy_compare(raw_image_ref, raw_image, to_int(desc_ref.channels), 8);
                 };
             }
         }

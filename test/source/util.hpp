@@ -22,6 +22,18 @@
 #include <fstream>
 #include <string>
 
+namespace qoipp
+{
+    // to allow ut's reporter pretty print conditions involving Desc
+    inline std::ostream& operator<<(std::ostream& out, const qoipp::Desc& desc) noexcept
+    {
+        auto [w, h, ch, cs] = desc;
+        auto ch_int         = static_cast<Byte>(ch);
+        auto cs_int         = static_cast<Byte>(cs);
+        return out << fmt::format("Desc{{ w: {}, h: {}, ch: {}, cs: {} }}", w, h, ch_int, cs_int);
+    }
+}
+
 namespace util
 {
     namespace fs = std::filesystem;

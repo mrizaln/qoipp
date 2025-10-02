@@ -9,7 +9,6 @@ static_assert(std::same_as<qoipp::Result<int>, std::expected<int, qoipp::Error>>
 using qoipp::Byte;
 using qoipp::ByteCSpan;
 using qoipp::ByteVec;
-using qoipp::Image;
 
 namespace fs = std::filesystem;
 namespace ut = boost::ut;
@@ -299,7 +298,7 @@ int main()
         const auto& [desc, raw, qoi, _] = input;
 
         const auto qoifile = util::mktemp();
-        expect(ut::nothrow([&] { qoipp::encode_into(qoifile, raw, desc, false); }));
+        expect(ut::nothrow([&] { std::ignore = qoipp::encode_into(qoifile, raw, desc, false); }));
 
         const auto header = qoipp::read_header(qoifile);
         expect(header.has_value()) << "Invalid header";
