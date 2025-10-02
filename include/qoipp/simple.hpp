@@ -33,7 +33,7 @@ namespace qoipp
      * @brief Read the header of a QOI image from a file.
      *
      * @param in_path The path to the file.
-     * @return The description of the image (std::nullopt if it's invalid).
+     * @return The description of QOI image if it is a valid QOI header.
      *
      * This function returns
      * - `Error::Empty` if the data read from file empty,
@@ -90,14 +90,14 @@ namespace qoipp
      *
      * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
      *
-     * Unlike `decode_into` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
+     * Unlike `decode_into()` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
      * doesn't have enough space since it can't know the size of the encoded data beforehand. The encoder
      * will just encode the data until it hit the out buffer limit or the encoding complete.
      *
      * While this function will partially encode the data, it won't have partial/unfinished data chunk. What
      * that means is that even though the buffer might be not enough, it might still have zeroes not filled
      * at the end of the buffer. The encoder might simply cannot fit the encoded data into the buffer if the
-     * chunk size is greater than the remaining space (for example QOI_OP_RGBA is a 5 bytes chunk, the
+     * chunk size is greater than the remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the
      * encoder won't write this data into the buffer if the buffer only have 4 bytes left).
      *
      * This function returns
@@ -116,14 +116,14 @@ namespace qoipp
      * @param desc The description of the image.
      * @return The status of encoding an error.
      *
-     * Unlike `decode_into` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
+     * Unlike `decode_into()` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
      * doesn't have enough space since it can't know the size of the encoded data beforehand. The encoder
      * will just encode the data until it hit the out buffer limit or the encoding complete.
      *
      * While this function will partially encode the data, it won't have partial/unfinished data chunk. What
      * that means is that even though the buffer might be not enough, it might still have zeroes not filled
      * at the end of the buffer. The encoder might simply cannot fit the encoded data into the buffer if the
-     * chunk size is greater than the remaining space (for example QOI_OP_RGBA is a 5 bytes chunk, the
+     * chunk size is greater than the remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the
      * encoder won't write this data into the buffer if the buffer only have 4 bytes left).
      *
      * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
@@ -220,7 +220,7 @@ namespace qoipp
      * @brief Decode the given QOI image.
      *
      * @param in_data The QOI image to decode.
-     * @param target The target channels to extract; if std::nullopt, the original channels will be used.
+     * @param target The target channels to extract; if `std::nullopt` the original channels will be used.
      * @param flip_vertically If true, the image will be flip vertically.
      * @return The decoded image or an error.
      *
@@ -243,7 +243,7 @@ namespace qoipp
      * @brief Decode a QOI image from a file.
      *
      * @param in_path The path to the file.
-     * @param target The target channels to extract; if std::nullopt, the original channels will be used.
+     * @param target The target channels to extract; if `std::nullopt` the original channels will be used.
      * @return Image The decoded image or an error.
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.
@@ -269,7 +269,7 @@ namespace qoipp
      *
      * @param out_buf The buffer to be filled with decoded data.
      * @param in_data The QOI image to decode.
-     * @param target The target channels to extract; if std::nullopt, the original channels will be used.
+     * @param target The target channels to extract; if `std::nullopt` the original channels will be used.
      * @param flip_vertically If true, the image will be flip vertically.
      * @return The decoded image or an error.
      *
@@ -315,7 +315,7 @@ namespace qoipp
      *
      * @param out_buf The buffer to be filled with decoded data.
      * @param in_path The path to the file.
-     * @param target The target channels to extract; if std::nullopt, the original channels will be used.
+     * @param target The target channels to extract; if `std::nullopt` the original channels will be used.
      * @return Image The decoded image or an error.
      *
      * If the underlying data is RGB and the target is RGBA, the alpha channel will be set to 0xFF.

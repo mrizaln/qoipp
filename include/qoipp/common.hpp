@@ -61,7 +61,7 @@ namespace qoipp
         Empty = 1,             // data length == 0
         TooShort,              // data length < header size
         TooBig,                // byte count > std::numeric_limits<size_t>::max() [overflow]
-        NotQoi,                // header is not qoi
+        NotQoi,                // header is not QOI
         InvalidDesc,           // Desc has invalid value
         MismatchedDesc,        // data has mismatch with Desc
         NotEnoughSpace,        // buffer not enough
@@ -199,7 +199,7 @@ namespace qoipp
         case Error::Empty: return "Data is empty";
         case Error::TooShort: return "Data is too short";
         case Error::TooBig: return "Image is too big to process";
-        case Error::NotQoi: return "Not a qoi file";
+        case Error::NotQoi: return "Not a QOI file";
         case Error::InvalidDesc: return "Image description is invalid";
         case Error::MismatchedDesc: return "Image description does not match the data";
         case Error::NotEnoughSpace: return "Buffer does not have enough space";
@@ -220,6 +220,8 @@ namespace qoipp
      *
      * @param channels The number of channels.
      * @return The corresponding Channels, or std::nullopt if number is not valid.
+     *
+     * For the inverse of the operation, you can use `std::to_underlying` or `static_cast` to an integer.
      */
     template <std::integral T>
     inline constexpr std::optional<Channels> to_channels(T channels) noexcept
@@ -232,10 +234,12 @@ namespace qoipp
     }
 
     /**
-     * @brief Helper function to convert a number of colorspace to the Colorspace enum.
+     * @brief Helper function to convert an inger to the Colorspace enum.
      *
      * @param colorspace The number of colorspace.
      * @return The corresponding Colorspace, or std::nullopt if number is not valid.
+     *
+     * For the inverse of the operation, you can use `std::to_underlying` or `static_cast` to an integer.
      */
     template <std::integral T>
     inline constexpr std::optional<Colorspace> to_colorspace(T colorspace) noexcept
@@ -267,13 +271,13 @@ namespace qoipp
     }
 
     /**
-     * @brief Check if iamge description is valid.
+     * @brief Check if image description is valid.
      *
      * @param desc The image description.
      * @return True if valid, else false.
      *
      * This function doesn't check whether the number of bytes an image created with this `Desc` is
-     * `Error::TooBig` to fit into `std::size_t`. Use `count_bytes` for that.
+     * `Error::TooBig` to fit into `std::size_t`. Use `count_bytes()` for that.
      */
     inline bool is_valid(const Desc& desc)
     {
@@ -284,7 +288,7 @@ namespace qoipp
     }
 
     /**
-     * @brief Count number of bytes produced by imaage described on desc.
+     * @brief Count number of bytes produced by image described by desc.
      *
      * @param desc The description of the image.
      * @return The number of bytes.
