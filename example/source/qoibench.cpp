@@ -244,7 +244,7 @@ struct BenchmarkResult
                     .total_decode_time = to_millis(info.decode_time).count(),
                     .pixels_per_encode = (float)pixel_count / to_micros(info.encode_time).count(),
                     .pixels_per_decode = (float)pixel_count / to_micros(info.decode_time).count(),
-                    .encode_size_KiB   = info.encoded_size / 1000,
+                    .encode_size_KiB   = info.encoded_size / 1024,
                     .encode_size_ratio = (float)info.encoded_size / (float)raw_size,
                 }
             );
@@ -492,15 +492,16 @@ EncodeResult<> qoipp_stream_encode(const RawImage& image)
     }
 
     auto off = qoipp::constants::header_size;
-    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), image.data.size() - off) };
-    auto res = encoder.encode(buffer, in);
+    auto out = qoipp::ByteSpan{ buffer.data() + off, buffer.size() - off };
+
+    auto res = encoder.encode(out, image.data);
     assert(res.has_value());
 
     auto size       = res->written;
     auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
-    buffer.resize(size + additional);
+    buffer.resize(off + size + additional);
 
-    if (not encoder.finalize({ buffer.data() + size, additional })) {
+    if (not encoder.finalize({ buffer.data() + off + size, additional })) {
         throw std::runtime_error{ "failed to finalize encoder" };
     }
 
@@ -537,9 +538,9 @@ DecodeResult qoipp_stream_decode(const QoiImage& image)
     auto desc = decoder.initialize({ image.data.data(), qoipp::constants::header_size }).value();
 
     auto off = qoipp::constants::header_size;
-    auto end = image.data.size() - qoipp::constants::end_marker_size;
+    auto end = image.data.size() - qoipp::constants::end_marker_size - off;
 
-    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), end - off) };
+    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), end) };
     auto res = decoder.decode(buffer, in);
     assert(res.has_value());
 
@@ -827,7 +828,7 @@ BenchmarkResult benchmark(const RawImage& raw_image, const fs::path& file, const
             auto [qoipp_time, _] = benchmark_impl(qoipp_decode, qoi_image);
             result.libs_info[lib::Lib::qoipp].decode_time = qoipp_time;
 
-            auto [qoipp2_time, _] = benchmark_impl(qoipp_stream_decode, qoi_image);
+            auto [qoipp2_time, __] = benchmark_impl(qoipp_stream_decode, qoi_image);
             result.libs_info[lib::Lib::qoipp2].decode_time = qoipp2_time;
         }
         if (opt.stb) {
