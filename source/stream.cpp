@@ -1,5 +1,4 @@
 #include "qoipp/stream.hpp"
-#include "qoipp/simple.hpp"
 
 #include "util.hpp"
 

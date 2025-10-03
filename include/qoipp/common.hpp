@@ -2,6 +2,7 @@
 #define QOIPP_COMMON_HPP_AW4EODSHFJ4U
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -346,6 +347,37 @@ namespace qoipp
         return (static_cast<std::size_t>(channels) + 1) * width * height    // channels + 1 tag
              + constants::header_size + constants::end_marker_size;
     }
+
+    /**
+     * @brief Read the header of a QOI image.
+     *
+     * @param in_data The data to read the header from.
+     * @return The description of QOI image if it is a valid QOI header.
+     *
+     * This function returns
+     * - `Error::Empty` if the length of the data is zero,
+     * - `Error::TooShort` if the length of the data passed in less than header length,
+     * - `Error::NotQoi` if the the data does not describe a QOI header, or
+     * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value.
+     */
+    Result<Desc> read_header(ByteCSpan in_data) noexcept;
+
+    /**
+     * @brief Read the header of a QOI image from a file.
+     *
+     * @param in_path The path to the file.
+     * @return The description of QOI image if it is a valid QOI header.
+     *
+     * This function returns
+     * - `Error::Empty` if the data read from file empty,
+     * - `Error::TooShort` if the length of the data read from file less than header length,
+     * - `Error::NotQoi` if the the data read from file does not describe a QOI header,
+     * - `Error::InvalidDesc` if any of the parsed field of `Desc` contains invalid value,
+     * - `Error::NotRegularFile` if file pointed by path is not a regular file,
+     * - `Error::FileNotExists` if file pointed by path not exists, or
+     * - `Error::IoError` if file can't be opened or read.
+     */
+    Result<Desc> read_header(const std::filesystem::path& in_path) noexcept;
 }
 
 #endif

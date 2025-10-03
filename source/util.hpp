@@ -2,6 +2,7 @@
 #define QOIPP_UTIL_HPP_XGTYIRU3W5F4N
 
 #include "qoipp/common.hpp"
+
 #include <cstring>
 
 namespace qoipp::inline aliases

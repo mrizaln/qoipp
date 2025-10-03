@@ -346,7 +346,7 @@ int main()
             };
         }
         if (path.extension() == ".qoi") {
-            fmt::println("Testing encode on '{}'", path.filename());
+            fmt::println("Testing decode on '{}'", path.filename());
             test("qoipp decode compared to reference" + path.filename().string()) = [&] {
                 auto qoi_image = util::read_file(path);
 
