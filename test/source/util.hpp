@@ -16,6 +16,7 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
+#include <range/v3/algorithm.hpp>
 #include <range/v3/view.hpp>
 
 #include <filesystem>
@@ -24,7 +25,7 @@
 
 namespace qoipp
 {
-    // to allow ut's reporter pretty print conditions involving Desc
+    // to allow ut's reporter to pretty print conditions involving Desc
     inline std::ostream& operator<<(std::ostream& out, const qoipp::Desc& desc) noexcept
     {
         auto [w, h, ch, cs] = desc;
@@ -38,6 +39,7 @@ namespace util
 {
     namespace fs = std::filesystem;
     namespace rv = ranges::views;
+    namespace rr = ranges;
 
     inline const auto test_image_dir = fs::current_path() / "resources" / "qoi_test_images";
 
@@ -172,11 +174,11 @@ namespace util
         auto lchunked = lhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
         auto rchunked = rhs | rv::chunk(chunk) | rv::transform(to_span) | ranges::to<std::vector>();
 
-        auto [lcs, ses, edit_dist] = dtl_modern::diff(lchunked, rchunked, [](auto l, auto r) {
-            auto lz = l.size();
-            auto rz = r.size();
-            return lz != rz ? false : std::equal(l.begin(), l.end(), r.begin(), r.end());
-        });
+        auto comp  = [](auto l, auto r) { return rr::equal(l, r); };
+        auto flags = dtl_modern::DiffFlags{ .m_huge = true };
+        auto diff  = dtl_modern::diff(lchunked, rchunked, comp, flags);
+
+        const auto& [lcs, ses, edit_dist] = diff;
 
         auto buffer = std::string{};
         auto out    = std::back_inserter(buffer);

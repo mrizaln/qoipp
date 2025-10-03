@@ -180,7 +180,7 @@ int main()
         const auto& [desc, raw, qoi, _] = input;
 
         const auto [decoded, actualdesc] = qoipp::decode(qoi).value();
-        expect(actualdesc == desc);
+        expect(that % actualdesc == desc);
         expect(that % decoded.size() == raw.size());
         expect(rr::equal(decoded, raw)) << util::lazy_compare(raw, decoded);
     } | simple_cases;
@@ -192,7 +192,7 @@ int main()
         auto rgb_desc  = qoipp::Desc{ desc.width, desc.height, qoipp::Channels::RGB, desc.colorspace };
 
         const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGB).value();
-        expect(actualdesc == rgb_desc);
+        expect(that % actualdesc == rgb_desc);
         expect(that % decoded.size() == rgb_image.size());
         expect(rr::equal(decoded, rgb_image)) << util::lazy_compare(rgb_image, decoded);
     } | simple_cases;
@@ -204,7 +204,7 @@ int main()
         auto rgba_desc  = qoipp::Desc{ desc.width, desc.height, qoipp::Channels::RGBA, desc.colorspace };
 
         const auto [decoded, actualdesc] = qoipp::decode(qoi, qoipp::Channels::RGBA).value();
-        expect(actualdesc == rgba_desc);
+        expect(that % actualdesc == rgba_desc);
         expect(that % decoded.size() == rgba_image.size());
         expect(rr::equal(decoded, rgba_image)) << util::lazy_compare(rgba_image, decoded);
     } | simple_cases;
@@ -217,7 +217,7 @@ int main()
         auto actualdesc = qoipp::decode_into(buffer, qoi).value();
         auto decoded    = ByteCSpan{ buffer.begin(), size };
 
-        expect(actualdesc == desc);
+        expect(that % actualdesc == desc);
         expect(that % decoded.size() == raw.size());
         expect(rr::equal(decoded, raw)) << util::lazy_compare(raw, decoded);
     } | simple_cases;
@@ -236,7 +236,7 @@ int main()
         };
         auto actualdesc = qoipp::decode_into(out, qoi).value();
 
-        expect(actualdesc == desc);
+        expect(that % actualdesc == desc);
         expect(that % result.size() == raw.size());
         expect(rr::equal(result, raw)) << util::lazy_compare(raw, result);
     } | simple_cases;
@@ -257,7 +257,7 @@ int main()
 
         qoipp::Image decoded;
         expect(ut::nothrow([&] { decoded = qoipp::decode(qoifile).value(); }));
-        expect(decoded.desc == desc);
+        expect(that % decoded.desc == desc);
         expect(that % decoded.data.size() == raw.size());
         expect(rr::equal(decoded.data, raw)) << util::lazy_compare(raw, decoded.data);
 
@@ -284,7 +284,7 @@ int main()
 
         const auto header = qoipp::read_header(qoi);
         expect(header.has_value()) << "Invalid header";
-        expect(*header == desc);
+        expect(that % *header == desc);
 
         const auto empty_header = qoipp::read_header(ByteVec{});
         expect(!empty_header.has_value());
@@ -302,7 +302,7 @@ int main()
 
         const auto header = qoipp::read_header(qoifile);
         expect(header.has_value()) << "Invalid header";
-        expect(*header == desc);
+        expect(that % *header == desc);
 
         std::ofstream ofs{ qoifile, std::ios::trunc };
         expect(fs::is_empty(qoifile));
@@ -317,7 +317,7 @@ int main()
         const auto& [desc, raw, qoi, qoi_incomplete] = input;
 
         const auto [decoded, actualdesc] = qoipp::decode(qoi_incomplete).value();
-        expect(actualdesc == desc);
+        expect(that % actualdesc == desc);
         expect(that % decoded.size() == raw.size());
     } | simple_cases;
 
@@ -340,7 +340,7 @@ int main()
                 const auto qoipp_image = qoipp::encode(image.data, image.desc).value();
 
                 expect(that % qoi_image.data.size() == qoipp_image.size());
-                expect(qoi_image.desc == image.desc);
+                expect(that % qoi_image.desc == image.desc);
                 expect(rr::equal(qoi_image.data, qoipp_image))
                     << util::lazy_compare(qoi_image.data, qoipp_image, 32, 1);
             };
@@ -354,7 +354,7 @@ int main()
                 const auto [raw_image, desc]         = qoipp::decode(path).value();
 
                 expect(that % raw_image_ref.size() == raw_image.size());
-                expect(desc_ref == desc);
+                expect(that % desc_ref == desc);
                 expect(rr::equal(raw_image_ref, raw_image))
                     << util::lazy_compare(raw_image_ref, raw_image, 32, 1);
             };

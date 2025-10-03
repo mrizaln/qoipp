@@ -41,13 +41,15 @@ int to_int(qoipp::Channels chan)
 // wrapper
 // -------
 ByteVec encode(
-    qoipp::Desc          desc,
-    ByteSpan             out_buffer,
-    ByteCSpan            input,
-    std::source_location loc = std::source_location::current()
+    qoipp::StreamEncoder& encoder,
+    qoipp::Desc           desc,
+    ByteSpan              out_buffer,
+    ByteCSpan             input,
+    std::source_location  loc = std::source_location::current()
 )
 {
-    auto encoder = qoipp::StreamEncoder{};
+    expect(not encoder.is_initialized()) << "encoder shouldn't be double initialized" << fatal;
+
     auto encoded = ByteVec(qoipp::constants::header_size);
 
     auto res = encoder.initialize(encoded, desc);
@@ -77,6 +79,7 @@ ByteVec encode(
 }
 
 ByteVec decode(
+    qoipp::StreamDecoder&          decoder,
     qoipp::Desc                    ref_desc,
     ByteSpan                       out_buffer,
     ByteCSpan                      input,
@@ -84,7 +87,8 @@ ByteVec decode(
     std::source_location           loc    = std::source_location::current()
 )
 {
-    auto decoder = qoipp::StreamDecoder{};
+    expect(not decoder.is_initialized()) << "decoder shouldn't be double initialized" << fatal;
+
     auto decoded = ByteVec{};
 
     if (target) {
@@ -180,12 +184,16 @@ int main()
 
     const auto simple_cases = std::array{ test_case_3, test_case_4 };
 
+    // only one encoder and decoder to also test the reusability :D
+    auto encoder = qoipp::StreamEncoder{};
+    auto decoder = qoipp::StreamDecoder{};
+
     for (auto i = 5u; i <= 1024; ++i) {
         test("stream encoder encode original | " + std::to_string(i)) = [&](TestCase input) {
             const auto& [desc, raw, qoi, _] = input;
 
             auto buffer  = ByteVec(i);
-            auto encoded = encode(desc, buffer, raw);
+            auto encoded = encode(encoder, desc, buffer, raw);
 
             expect(that % qoi.size() == encoded.size());
             expect(rr::equal(qoi, encoded)) << lazy_compare(qoi, encoded, 1, 32);
@@ -197,7 +205,7 @@ int main()
             const auto& [desc, raw, qoi, _] = input;
 
             auto buffer  = ByteVec(i);
-            auto decoded = decode(desc, buffer, qoi);
+            auto decoded = decode(decoder, desc, buffer, qoi);
 
             expect(that % raw.size() == decoded.size());
             expect(rr::equal(raw, decoded)) << lazy_compare(raw, decoded, to_int(desc.channels), 8);
@@ -210,7 +218,7 @@ int main()
                                                                  : util::to_rgb(raw);
 
             auto buffer  = ByteVec(i);
-            auto decoded = decode(desc, buffer, qoi, qoipp::Channels::RGB);
+            auto decoded = decode(decoder, desc, buffer, qoi, qoipp::Channels::RGB);
 
             expect(that % rgb_raw.size() == decoded.size());
             expect(rr::equal(rgb_raw, decoded)) << lazy_compare(rgb_raw, decoded, to_int(desc.channels), 8);
@@ -224,7 +232,7 @@ int main()
                               : util::to_rgba(raw);
 
             auto buffer  = ByteVec(i);
-            auto decoded = decode(desc, buffer, qoi, qoipp::Channels::RGBA);
+            auto decoded = decode(decoder, desc, buffer, qoi, qoipp::Channels::RGBA);
 
             expect(that % rgba_raw.size() == decoded.size());
             expect(rr::equal(rgba_raw, decoded)) << lazy_compare(rgba_raw, decoded, to_int(desc.channels), 8);
@@ -234,7 +242,7 @@ int main()
             const auto& [desc, raw, qoi, qoi_incomplete] = input;
 
             auto buffer     = ByteVec(i);
-            auto decoded    = decode(desc, buffer, qoi_incomplete);
+            auto decoded    = decode(decoder, desc, buffer, qoi_incomplete);
             auto incomplete = raw.subspan(0, decoded.size());
 
             expect(that % raw.size() != decoded.size());
@@ -268,7 +276,7 @@ int main()
                     // randomize :D
                     auto range       = std::uniform_int_distribution{ 5ul, raw.size() - 1 };
                     auto buffer      = ByteVec(range(rng));
-                    auto qoipp_image = encode(desc, buffer, raw);
+                    auto qoipp_image = encode(encoder, desc, buffer, raw);
 
                     expect(that % qoi_image.data.size() == qoipp_image.size());
                     expect(that % qoi_image.desc == image.desc);
@@ -291,7 +299,7 @@ int main()
                     auto end       = qoi.size() - qoipp::constants::end_marker_size;
                     auto range     = std::uniform_int_distribution{ 5ul, end - 1 };
                     auto buffer    = ByteVec(range(rng));
-                    auto raw_image = decode(desc_ref, buffer, qoi);
+                    auto raw_image = decode(decoder, desc_ref, buffer, qoi);
 
                     expect(that % raw_image_ref.size() == raw_image.size());
                     expect(rr::equal(raw_image_ref, raw_image))
