@@ -11,7 +11,7 @@
 
 int main(int argc, char** argv)
 {
-    auto app = CLI::App{ "swap qoi channels around :p" };
+    auto app = CLI::App{ "swap qoi image channels around :P" };
 
     auto input = std::filesystem::path{};
     app.add_option("input", input, "the qoi image to be swapped around")->required();

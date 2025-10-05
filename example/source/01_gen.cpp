@@ -137,9 +137,9 @@ int main(int argc, char* argv[])
     unsigned int height = 500;
 
     app.add_option("outfile", outpath, "The output filepath for the generated image")->default_val(outpath);
-    app.add_option("-w,--width", width, "The width of the qoi image")->required();
+    app.add_option("-W,--width", width, "The width of the qoi image")->required();
     app.add_option("-H,--height", height, "The height of the qoi image")->required();
-    app.add_option("-c,--channels", channels, "The channels of the qoi image")
+    app.add_option("-C,--channels", channels, "The channels of the qoi image")
         ->required()
         ->transform(CLI::CheckedTransformer(CHANNELS_STR, CLI::ignore_case));
 

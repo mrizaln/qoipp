@@ -50,20 +50,20 @@ function(create_executable)
 endfunction()
 
 create_executable(
-    NAME qoigen
+    NAME 01_gen
     DEPS CLI11::CLI11 fmt::fmt siv::PerlinNoise range-v3::range-v3 qoipp
 )
 create_executable(
-    NAME qoiconv
+    NAME 02_conv
     DEPS CLI11::CLI11 fmt::fmt stb::stb qoipp
 )
 create_executable(
-    NAME qoibench
-    DEPS CLI11::CLI11 fmt::fmt stb::stb fpng qoi qoixx qoipp
+    NAME 03_swap
+    DEPS CLI11::CLI11 fmt::fmt qoipp
 )
 create_executable(
-    NAME qoiswap
-    DEPS CLI11::CLI11 fmt::fmt qoipp
+    NAME 04_bench
+    DEPS CLI11::CLI11 fmt::fmt stb::stb fpng qoi qoixx qoipp
 )
 
 # build fuzz on clang only
