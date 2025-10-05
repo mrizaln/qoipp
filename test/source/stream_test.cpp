@@ -54,6 +54,7 @@ ByteVec encode(
 
     auto res = encoder.initialize(encoded, desc);
     expect(res.has_value(), loc) << "write header should successful" << fatal;
+    expect(that % res.value() == qoipp::constants::header_size);
 
     auto off = 0ul;
     auto out = out_buffer;

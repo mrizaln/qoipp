@@ -110,18 +110,18 @@ namespace qoipp
     {
     }
 
-    Result<void> StreamEncoder::initialize(ByteSpan out_buf, Desc desc) noexcept
+    Result<std::size_t> StreamEncoder::initialize(ByteSpan out_buf, Desc desc) noexcept
     {
         if (m_channels) {
-            return make_error<void>(Error::AlreadyInitialized);
+            return make_error<std::size_t>(Error::AlreadyInitialized);
         }
 
         if (out_buf.size() == 0) {
-            return make_error<void>(Error::Empty);
+            return make_error<std::size_t>(Error::Empty);
         } else if (out_buf.size() < constants::header_size) {
-            return make_error<void>(Error::TooShort);
+            return make_error<std::size_t>(Error::TooShort);
         } else if (auto bytes = count_bytes(desc); not bytes) {
-            return make_error<void>(bytes.error());
+            return make_error<std::size_t>(bytes.error());
         }
 
         auto [width, height, channels, colorspace] = desc;
@@ -132,7 +132,7 @@ namespace qoipp
         chunk_array.write_header(width, height, channels, colorspace);
 
         m_channels = desc.channels;
-        return Result<void>{};
+        return constants::header_size;
     }
 
     Result<StreamResult> StreamEncoder::encode(ByteSpan out_buf, ByteCSpan in_buf) noexcept

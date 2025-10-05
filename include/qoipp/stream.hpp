@@ -21,6 +21,7 @@ namespace qoipp
          *
          * @param out_buf The buffer to be written.
          * @param desc The description of the image to be encoded later.
+         * @return Number of bytes written into output buffer (always header length).
          *
          * This function will both prepare the internal state of the encoder and fill the `out_buf` with the
          * header information for QOI. You should not call this function twice. To reuse this encoder and
@@ -34,7 +35,7 @@ namespace qoipp
          * - `Error::InvalidDesc` if any of the field of `Desc` contains invalid value, or
          * - `Error::AlreadyInitialized` if the encoder is already initialized.
          */
-        Result<void> initialize(ByteSpan out_buf, Desc desc) noexcept;
+        Result<std::size_t> initialize(ByteSpan out_buf, Desc desc) noexcept;
 
         /**
          * @brief Encode the pixel data into out.
