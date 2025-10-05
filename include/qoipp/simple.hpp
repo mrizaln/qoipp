@@ -5,12 +5,6 @@
 
 namespace qoipp
 {
-    struct EncodeStatus
-    {
-        std::size_t written;
-        bool        complete;
-    };
-
     /**
      * @brief Encode the given data into a QOI image.
      *
@@ -51,19 +45,20 @@ namespace qoipp
      * @param out_buf The buffer to be filled with encoded data.
      * @param in_data The data to encode.
      * @param desc The description of the image.
-     * @return The status of encoding an error.
+     * @return The status of encoding or an error.
      *
      * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
      *
      * Unlike `decode_into()` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
      * doesn't have enough space since it can't know the size of the encoded data beforehand. The encoder
-     * will just encode the data until it hit the out buffer limit or the encoding complete.
+     * will just encode the data until it hit the out buffer limit or the encoding complete. To make sure the
+     * output buffer is enough, you may want to allocate the output buffer with the size more than or equal to
+     * `worst_size()`.
      *
-     * While this function will partially encode the data, it won't have partial/unfinished data chunk. What
-     * that means is that even though the buffer might be not enough, it might still have zeroes not filled
-     * at the end of the buffer. The encoder might simply cannot fit the encoded data into the buffer if the
-     * chunk size is greater than the remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the
-     * encoder won't write this data into the buffer if the buffer only have 4 bytes left).
+     * While this function will partially encode the data, it won't have partial/unfinished data chunk. The
+     * encoder might simply cannot fit the encoded data into the buffer if the chunk size is greater than the
+     * remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the encoder won't write this data into
+     * the buffer if the buffer only have 4 bytes left).
      *
      * This function returns
      * - `Error::Empty` if the length of the data is zero,
@@ -79,19 +74,20 @@ namespace qoipp
      * @param out_buf The buffer to be filled with encoded data.
      * @param in_func The function to generate the data (noexcept).
      * @param desc The description of the image.
-     * @return The status of encoding an error.
+     * @return The status of encoding or an error.
+     *
+     * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
      *
      * Unlike `decode_into()` functions, this function won't return `Error::NotEnoughSpace` if the `out_buf`
      * doesn't have enough space since it can't know the size of the encoded data beforehand. The encoder
-     * will just encode the data until it hit the out buffer limit or the encoding complete.
+     * will just encode the data until it hit the out buffer limit or the encoding complete. To make sure the
+     * output buffer is enough, you may want to allocate the output buffer with the size more than or equal to
+     * `worst_size()`.
      *
-     * While this function will partially encode the data, it won't have partial/unfinished data chunk. What
-     * that means is that even though the buffer might be not enough, it might still have zeroes not filled
-     * at the end of the buffer. The encoder might simply cannot fit the encoded data into the buffer if the
-     * chunk size is greater than the remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the
-     * encoder won't write this data into the buffer if the buffer only have 4 bytes left).
-     *
-     * This function assumes that the raw data is in the format of RGB888 or RGBA8888.
+     * While this function will partially encode the data, it won't have partial/unfinished data chunk. The
+     * encoder might simply cannot fit the encoded data into the buffer if the chunk size is greater than the
+     * remaining space (for example `QOI_OP_RGBA` is a 5 bytes chunk, the encoder won't write this data into
+     * the buffer if the buffer only have 4 bytes left).
      *
      * This function returns
      * - `Error::TooBig` if the image is too big to process, or

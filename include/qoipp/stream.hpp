@@ -5,12 +5,21 @@
 
 namespace qoipp
 {
-    struct StreamResult
-    {
-        std::size_t processed;
-        std::size_t written;
-    };
-
+    /**
+     * @class StreamEncoder
+     * @brief Stream-based QOI encoder.
+     *
+     * The encoder won't allocate anything in its lifetime, no exception will thrown from the member
+     * functions, and not-thread safe.
+     *
+     * To use this encoder correctly, you do these steps:
+     * - Call `initialize()`,
+     * - Call `encode()` repeatedly, and
+     * - Call `finalize()` to finish.
+     *
+     * The decision to stop calling `encode()` and finishes the decoding process is up to the caller. You can
+     * track both the produced bytes and/or the processed input bytes to do this.
+     */
     class StreamEncoder
     {
     public:
@@ -106,6 +115,21 @@ namespace qoipp
         RunningArray            m_seen;
     };
 
+    /**
+     * @class StreamDecoder
+     * @brief Stream-based QOI decoder.
+     *
+     * The decoder won't allocate anything in its lifetime, no exception will thrown from the member
+     * functions, and not-thread safe.
+     *
+     * To use this encoder correctly, you do these steps:
+     * - Call `initialize()`,
+     * - Call `decode()` repeatedly, and
+     * - Call `drain_run()` (possibly repeatedly).
+     *
+     * The decision to stop calling `decode()` and finishes the decoding process is up to the caller. You can
+     * track both the produced bytes and/or the processed input bytes to do this.
+     */
     class StreamDecoder
     {
     public:
@@ -161,7 +185,7 @@ namespace qoipp
          * You might need to call this function multiple times if your buffer is not enough to drain the
          * `QOI_OP_RUN` instruction. `QOI_OP_RUN` can produce at most 62 pixels, so that would be 186 bytes
          * for RGB and 248 bytes for RGBA. You can check whether the stored run count is non-zero using
-         * `has_run_count` member function.
+         * `has_run_count()` member function. Use `run_count()` to get the value of `QOI_OP_RUN`.
          *
          * This function returns
          * - `Error::Empty` if the length of the `out_buf` is zero, or

@@ -45,22 +45,40 @@ namespace qoipp
     using PixelSinkFun = std::function<void(Pixel pixel)>;
     using ByteSinkFun  = std::function<void(std::uint8_t byte)>;
 
+    /**
+     * @enum Colorspace
+     * @brief Image colorspace.
+     *
+     * This won't affect encoding process.
+     */
     enum class Colorspace : Byte
     {
         sRGB   = 0,
         Linear = 1,
     };
 
+    /**
+     * @enum Channels
+     * @brief Image type (also number of bytes per pixel).
+     *
+     * This will affect encoding process.
+     */
     enum class Channels : Byte
     {
         RGB  = 3,
         RGBA = 4,
     };
 
+    /**
+     * @enum Error
+     * @brief Error enumeration of qoipp operations.
+     *
+     * Use `to_string()` function to get the human-readable description of the enumeration.
+     */
     enum class Error
     {
         Empty = 1,             // data length == 0
-        TooShort,              // data length < header size
+        TooShort,              // e.g. data length < header size
         TooBig,                // byte count > std::numeric_limits<size_t>::max() [overflow]
         NotQoi,                // header is not QOI
         InvalidDesc,           // Desc has invalid value
@@ -75,6 +93,10 @@ namespace qoipp
         BadAlloc,              // bad alloc [like out of memory]
     };
 
+    /**
+     * @class Pixel
+     * @brief Represent a pixel on an image.
+     */
     struct Pixel
     {
         Byte r;
@@ -85,6 +107,10 @@ namespace qoipp
         constexpr auto operator<=>(const Pixel&) const = default;
     };
 
+    /**
+     * @class Desc
+     * @brief QOI image description.
+     */
     struct Desc
     {
         std::uint32_t width;
@@ -95,16 +121,53 @@ namespace qoipp
         constexpr auto operator<=>(const Desc&) const = default;
     };
 
+    /**
+     * @class Image
+     * @brief Raw image data (whether in `RGB` or `RGBA` which is specified in `desc`).
+     */
     struct Image
     {
         ByteVec data;
         Desc    desc;
     };
 
+    /**
+     * @class EncodeStatus
+     * @brief Result of encode operation.
+     *
+     * This struct is used mainly with `encode_into()` functions. In the case of the output buffer is not
+     * enough, the function will only decode up to the number of bytes available (no partial data chunk). This
+     * struct is used to indicate whether the encode operation fully complete or only partially complete.
+     */
+    struct EncodeStatus
+    {
+        std::size_t written;
+        bool        complete;
+    };
+
+    /**
+     * @class StreamResult
+     * @brief Result of stream-based encode/decode operation.
+     *
+     * The unit is in bytes; `processed` field corresponds to number of bytes from input buffer has been
+     * processed while `written` field corresponds to number of bytes written to output buffer.
+     */
+    struct StreamResult
+    {
+        std::size_t processed;
+        std::size_t written;
+    };
+
 #if defined(__cpp_lib_expected)
     template <typename T>
     using Result = std::expected<T, Error>;
 #else
+    /**
+     * @class Result
+     * @brief An imitation of `std::expected()` :D.
+     *
+     * Use `make_result()` or `make_error()` helper function to construct this class.
+     */
     template <typename T>
     class [[nodiscard]] Result
     {
@@ -190,7 +253,7 @@ namespace qoipp
     }
 
     /**
-     * @brief Get a human readable description for an error value.
+     * @brief Get a human-readable description for an error value.
      *
      * @param error Error value.
      */
@@ -301,7 +364,7 @@ namespace qoipp
     inline Result<std::size_t> count_bytes(const Desc& desc)
     {
         if (not is_valid(desc)) {
-            return make_result<std::size_t>(Error::InvalidDesc);
+            return make_error<std::size_t>(Error::InvalidDesc);
         }
 
         // detect overflow: https://stackoverflow.com/a/1815371/16506263
@@ -312,13 +375,13 @@ namespace qoipp
 
         const auto& [width, height, channels, _] = desc;
         if (overflows(width, height)) {
-            return make_result<std::size_t>(Error::TooBig);
+            return make_error<std::size_t>(Error::TooBig);
         }
 
         const auto pixel_count = static_cast<std::size_t>(width) * height;
         const auto chan        = static_cast<std::size_t>(channels);
         if (overflows(pixel_count, chan)) {
-            return make_result<std::size_t>(Error::TooBig);
+            return make_error<std::size_t>(Error::TooBig);
         }
 
         return pixel_count * chan;
@@ -339,7 +402,7 @@ namespace qoipp
     inline Result<std::size_t> worst_size(const Desc& desc)
     {
         if (const auto bytes = count_bytes(desc); not bytes) {
-            return make_result<std::size_t>(bytes.error());
+            return make_error<std::size_t>(bytes.error());
         }
 
         const auto& [width, height, channels, _] = desc;
