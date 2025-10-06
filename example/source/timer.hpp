@@ -1,118 +1,84 @@
-#ifndef TIMER_HPP
-#define TIMER_HPP
+#ifndef TIMER_HPP_FGYUGWEH
+#define TIMER_HPP_FGYUGWEH
+
+#include <fmt/base.h>
+#include <fmt/std.h>
 
 #include <chrono>
-#include <concepts>
-#include <functional>
-#include <iostream>
-#include <string>
-#include <type_traits>
 
-// #define TIMER_FORCE_PRINT
-
-namespace timer_detail
+namespace timer
 {
-    template <typename Type>
-    concept Duration = std::same_as<Type, std::chrono::seconds>
-                    || std::same_as<Type, std::chrono::milliseconds>
-                    || std::same_as<Type, std::chrono::microseconds>
-                    || std::same_as<Type, std::chrono::nanoseconds>;
-}
+    using Clock = std::chrono::steady_clock;
+    using Sec   = std::chrono::duration<double>;
+    using MSec  = std::chrono::duration<double, std::milli>;
+    using USec  = std::chrono::microseconds;
+    using NSec  = std::chrono::nanoseconds;
 
-template <timer_detail::Duration D = std::chrono::milliseconds>
-class                                                                                     //
-    [[nodiscard("Value will be destroyed immediately (will outputs incorrect time)")]]    //
-    Timer
-{
-public:
-    // type aliases
-    using clock_type  = std::chrono::steady_clock;
-    using second_type = D;
-
-    inline static bool s_doPrint{ true };
-
-public:
-    static void once(std::function<void()> func, const std::string& name = "[unnamed]")
+    template <typename Dur = MSec>
+    auto time(std::invocable auto fn)
     {
-        Timer timer{ name };
-        func();
-    }
-
-public:
-    Timer(const std::string& name, bool doAutoPrint = true)
-        : m_name{ name }
-        , m_doAutoPrint{ doAutoPrint }
-    {
-    }
-
-    // #if (!defined(NDEBUG) or defined(TIMER_FORCE_PRINT)) and !defined(TIMER_SUPPRESS_PRINT)
-    ~Timer()
-    {
-        if (s_doPrint && m_doAutoPrint) {
-            print();
-        }
-    }
-    // #endif
-
-    void reset() { m_beginning = clock_type::now(); }
-
-    auto elapsed() const
-    {
-        return std::chrono::duration_cast<second_type>(clock_type::now() - m_beginning).count();
-    }
-
-    double elapsedAndReset()
-    {
-        auto time{ elapsed() };
-        reset();
-        return time;
-    }
-
-    double elapsedAndStop()
-    {
-        m_doAutoPrint = false;
-        return elapsed();
-    }
-
-    void print()
-    {
-        if constexpr (std::is_same_v<D, std::chrono::seconds>) {
-            std::cout << m_name << ": " << elapsed() << " au\n";
-        } else if constexpr (std::is_same_v<D, std::chrono::milliseconds>) {
-            std::cout << m_name << ": " << elapsed() << " ms\n";
-        } else if constexpr (std::is_same_v<D, std::chrono::microseconds>) {
-            std::cout << m_name << ": " << elapsed() << " us\n";
-        } else if constexpr (std::is_same_v<D, std::chrono::nanoseconds>) {
-            std::cout << m_name << ": " << elapsed() << " ns\n";
+        if constexpr (std::same_as<void, std::invoke_result_t<decltype(fn)>>) {
+            auto start = Clock::now();
+            std::move(fn)();
+            auto duration = std::chrono::duration_cast<Dur>(Clock::now() - start);
+            return std::pair{ std::move(std::monostate{}), duration };
         } else {
-            std::cout << m_name << ": " << elapsed() << " au\n";
+            auto start    = Clock::now();
+            auto result   = std::move(fn)();
+            auto duration = std::chrono::duration_cast<Dur>(Clock::now() - start);
+            return std::pair{ std::move(result), duration };
         }
     }
 
-private:
-    const std::string                   m_name;
-    bool                                m_doAutoPrint;
-    std::chrono::time_point<clock_type> m_beginning{ clock_type::now() };
-};
-
-namespace timer_detail
-{
-    template <typename D>
-    struct TimerCallerDummy
+    auto time_s(std::invocable auto fn)
     {
-        const char* name;
+        return time<Sec>(std::move(fn));
+    }
 
-        template <std::invocable F>
-        friend auto operator*(TimerCallerDummy&& d, F&& f) -> std::invoke_result_t<F>
-        {
-            Timer<D> timer{ d.name };
-            return f();
-        }
-    };
+    auto time_ms(std::invocable auto fn)
+    {
+        return time<MSec>(std::move(fn));
+    }
+
+    auto time_us(std::invocable auto fn)
+    {
+        return time<USec>(std::move(fn));
+    }
+
+    auto time_ns(std::invocable auto fn)
+    {
+        return time<NSec>(std::move(fn));
+    }
+
+    template <typename Dur = MSec>
+    auto time_print(std::string_view prefix, std::invocable auto fn)
+    {
+        fmt::print("[time] {}: ...", prefix);
+        std::fflush(stdout);
+        auto [res, dur] = time<Dur>(std::move(fn));
+        fmt::println("\r[time] {}: {}", prefix, dur);
+        return std::move(res);
+    }
+
+    auto time_print_s(std::string_view prefix, std::invocable auto fn)
+    {
+        return time_print<Sec>(prefix, std::move(fn));
+    }
+
+    auto time_print_ms(std::string_view prefix, std::invocable auto fn)
+    {
+        return time_print<MSec>(prefix, std::move(fn));
+    }
+
+    auto time_print_us(std::string_view prefix, std::invocable auto fn)
+    {
+        return time_print<USec>(prefix, std::move(fn));
+    }
+
+    auto time_print_ns(std::string_view prefix, std::invocable auto fn)
+    {
+        return time_print<NSec>(prefix, std::move(fn));
+    }
 }
 
-#define DO_TIME_US(Cstr) timer_detail::TimerCallerDummy<std::chrono::microseconds>{ "[DO_TIME] " Cstr }* [&]()
-#define DO_TIME_MS(Cstr) timer_detail::TimerCallerDummy<std::chrono::milliseconds>{ "[DO_TIME] " Cstr }* [&]()
-#define DO_TIME(Cstr)    DO_TIME_MS (Cstr)
-
-#endif /* ifndef TIMER_HPP */
+#endif /* ifndef TIMER_HPP_FGYUGWEH */

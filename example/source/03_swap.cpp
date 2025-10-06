@@ -1,12 +1,12 @@
+#include "timer.hpp"
+
 #include <qoipp/simple.hpp>
 
-#include <CLI/App.hpp>
 #include <CLI/CLI.hpp>
 #include <filesystem>
-#include <fmt/core.h>
+#include <fmt/base.h>
 #include <fmt/std.h>
 
-#include <chrono>
 #include <fstream>
 
 int main(int argc, char** argv)
@@ -64,19 +64,15 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    auto now     = std::chrono::steady_clock::now();
-    auto swapped = qoipp::encode(SwapChannels{ *image }, image->desc);
+    auto [swapped, time] = timer::time_ms([&] { return qoipp::encode(SwapChannels{ *image }, image->desc); });
     if (not swapped) {
         fmt::println(stderr, "failed to encode into qoi image: {}", to_string(swapped.error()));
     }
 
-    auto duration = std::chrono::steady_clock::now() - now;
-
     auto out = std::fstream{ input, std::ios::out | std::ios::binary };
     out.write(reinterpret_cast<char*>(swapped->data()), static_cast<std::streamsize>(swapped->size()));
 
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    fmt::println("Swapped channels in {}ms", ms);
+    fmt::println("Swapped channels in {}", time);
 
     return 0;
 }

@@ -1,13 +1,13 @@
-#include "qoipp/simple.hpp"
-
 #include "timer.hpp"
+
+#include <qoipp/simple.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #include <stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <CLI/CLI.hpp>
-#include <fmt/core.h>
+#include <fmt/base.h>
 #include <stb_image_write.h>
 
 #include <cstddef>
@@ -93,9 +93,9 @@ ByteVec load_file(const fs::path& filepath)
     const auto size  = fs::file_size(filepath);
     auto       bytes = ByteVec(size);
 
-    DO_TIME_MS ("Read from file") {
+    timer::time_print_ms("Read from file", [&] {
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-    };
+    });
 
     return bytes;
 }
@@ -104,8 +104,7 @@ ImageVar read_png(const fs::path& filepath)
 {
     auto  bytes = load_file(filepath);
     int   width, height, channels;
-    auto* data = DO_TIME_MS ("Decode png (stb)")
-    {
+    auto* data = timer::time_print_ms("Decode png (stb)", [&] {
         return stbi_load_from_memory(
             reinterpret_cast<unsigned char*>(bytes.data()),
             static_cast<int>(bytes.size()),
@@ -114,7 +113,7 @@ ImageVar read_png(const fs::path& filepath)
             &channels,
             0
         );
-    };
+    });
 
     if (data == nullptr) {
         throw std::runtime_error{ std::format("Failed to load PNG image '{}'", filepath.c_str()) };
@@ -138,20 +137,17 @@ ImageVar read_png(const fs::path& filepath)
 
 ImageVar read_qoi(const fs::path& filepath, bool rgb_only)
 {
-    auto bytes   = load_file(filepath);
-    auto decoded = DO_TIME_MS ("Decode qoi (qoipp)")
-    {
+    auto bytes = load_file(filepath);
+    return { timer::time_print_ms("Decode qoi (qoipp)", [&] {
         return qoipp::decode(bytes, rgb_only ? std::optional{ qoipp::Channels::RGB } : std::nullopt).value();
-    };
-    return { decoded };
+    }) };
 }
 
 void write_png(const ImageVar& image, const fs::path& filepath)
 {
     const auto& [data, desc] = image.get();
 
-    auto status = DO_TIME_MS ("Encode png (stb) [and write to file]")
-    {
+    auto status = timer::time_print_ms("Encode png (stb) [and write to file]", [&] {
         using Data                        = StbImage::Data;
         auto [width, height, channels, _] = desc;
         return stbi_write_png(
@@ -162,7 +158,7 @@ void write_png(const ImageVar& image, const fs::path& filepath)
             reinterpret_cast<const Data*>(data.data()),
             0
         );
-    };
+    });
 
     if (status == 0) {
         throw std::runtime_error{ std::format("Failed to write image to '{}'", filepath.c_str()) };
@@ -173,15 +169,14 @@ void write_qoi(const ImageVar& image, const fs::path& filepath)
 {
     auto [data, desc] = image.get();
 
-    auto encoded = DO_TIME_MS ("Encode qoi (qoipp)")
-    {
+    auto encoded = timer::time_print_ms("Encode qoi (qoipp)", [&] {
         return qoipp::encode(data, desc).value();
-    };
-    auto out = std::ofstream{ filepath, std::ios::binary | std::ios::trunc };
+    });
 
-    DO_TIME_MS ("Write to file (qoipp)") {
+    auto out = std::ofstream{ filepath, std::ios::binary | std::ios::trunc };
+    timer::time_print_ms("Write to file (qoipp)", [&] {
         out.write(reinterpret_cast<char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
-    };
+    });
 }
 
 std::pair<FileType, FileType> validate(const fs::path& input, const fs::path& output) noexcept(false)

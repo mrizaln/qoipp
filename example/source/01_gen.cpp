@@ -1,9 +1,10 @@
 #include "timer.hpp"
 
+#include <qoipp/simple.hpp>
+
 #include <CLI/CLI.hpp>
 #include <PerlinNoise.hpp>
-#include <fmt/core.h>
-#include <qoipp/simple.hpp>
+#include <fmt/base.h>
 #include <range/v3/algorithm.hpp>
 #include <range/v3/view.hpp>
 
@@ -159,17 +160,15 @@ int main(int argc, char* argv[])
 
     auto img_gen = ImageGen{ channels };
 
-    auto bytes = DO_TIME_MS ("Generate image")
-    {
+    auto bytes = timer::time_print_ms("Generate image", [&] {
         fmt::println("Generating image...");
         return img_gen.generate(desc.width, desc.height);
-    };
+    });
 
-    auto encoded = DO_TIME_MS ("Encode image")
-    {
+    auto encoded = timer::time_print_ms("Encode image", [&] {
         fmt::println("Encoding image...");
         return qoipp::encode(bytes, desc);
-    };
+    });
 
     if (not encoded) {
         fmt::println(stderr, "failed to encode qoi image: {}", to_string(encoded.error()));

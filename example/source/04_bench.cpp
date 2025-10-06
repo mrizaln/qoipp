@@ -1,3 +1,5 @@
+#include "timer.hpp"
+
 #include <qoipp/simple.hpp>
 #include <qoipp/stream.hpp>
 #define QOI_IMPLEMENTATION
@@ -13,12 +15,11 @@
 #include <stb_image_write.h>
 
 #include <CLI/CLI.hpp>
+#include <fmt/base.h>
 #include <fmt/color.h>
-#include <fmt/core.h>
 #include <fmt/std.h>
 
 #include <atomic>
-#include <chrono>
 #include <csignal>
 #include <exception>
 #include <filesystem>
@@ -30,9 +31,7 @@ std::atomic<bool> g_interrupt = false;
 
 namespace fs = std::filesystem;
 
-using Clock     = std::chrono::high_resolution_clock;
-using TimePoint = Clock::time_point;
-using Duration  = Clock::duration;    // nano seconds
+using Duration = timer::NSec;
 
 struct FmtFill
 {
@@ -41,10 +40,9 @@ struct FmtFill
 };
 
 template <>
-struct fmt::formatter<FmtFill>
+struct fmt::formatter<FmtFill> : fmt::formatter<std::string_view>
 {
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
-    constexpr auto format(FmtFill f, format_context& ctx)
+    constexpr auto format(FmtFill f, format_context& ctx) const
     {
         auto&& out = ctx.out();
         for (std::size_t i = 0; i < f.width; ++i) {
@@ -103,17 +101,6 @@ struct DecodeResult
     RawImage image;
     Duration time;
 };
-
-auto desc_string(const qoipp::Desc& desc)
-{
-    return fmt::format(
-        "{}x{} ({}|{})",
-        desc.width,
-        desc.height,
-        fmt::underlying(desc.channels),
-        fmt::underlying(desc.colorspace)
-    );
-}
 
 struct Options
 {
@@ -364,10 +351,8 @@ EncodeResult<> qoi_encode_wrapper(const RawImage& image)
         .colorspace = static_cast<unsigned char>(image.desc.colorspace),
     };
 
-    int   len;
-    auto  timepoint = Clock::now();
-    auto* data      = qoi_encode(image.data.data(), &desc, &len);
-    auto  duration  = Clock::now() - timepoint;
+    int len;
+    auto [data, duration] = timer::time_ns([&] { return qoi_encode(image.data.data(), &desc, &len); });
 
     if (!data) {
         throw std::runtime_error{ "Error encoding image (qoi)" };
@@ -390,10 +375,9 @@ EncodeResult<> qoi_encode_wrapper(const RawImage& image)
 DecodeResult qoi_decode_wrapper(const QoiImage& image)
 {
     qoi_desc desc;
-
-    auto  timepoint = Clock::now();
-    auto* data      = qoi_decode(image.data.data(), (int)image.data.size(), &desc, 0);
-    auto  duration  = Clock::now() - timepoint;
+    auto [data, duration] = timer::time_ns([&] {
+        return qoi_decode(image.data.data(), (int)image.data.size(), &desc, 0);
+    });
 
     if (!data) {
         throw std::runtime_error{ "Error decoding image (qoi)" };
@@ -430,9 +414,7 @@ EncodeResult<> qoixx_encode(const RawImage& image)
         .colorspace = static_cast<qoixx::qoi::colorspace>(image.desc.colorspace),
     };
 
-    auto timepoint = Clock::now();
-    auto encoded   = qoixx::qoi::encode<T>(image.data, desc);
-    auto duration  = Clock::now() - timepoint;
+    auto [encoded, duration] = timer::time_ns([&] { return qoixx::qoi::encode<T>(image.data, desc); });
 
     return {
         .image = { encoded, image.desc },
@@ -444,9 +426,8 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
 {
     using T = qoipp::ByteVec;
 
-    auto timepoint       = Clock::now();
-    auto [encoded, desc] = qoixx::qoi::decode<T>(image.data);
-    auto duration        = Clock::now() - timepoint;
+    auto [res, duration] = timer::time_ns([&] { return qoixx::qoi::decode<T>(image.data); });
+    auto [decoded, desc] = std::move(res);
 
     auto qoipp_desc = qoipp::Desc{
         .width      = desc.width,
@@ -456,23 +437,22 @@ EncodeResult<> qoixx_decode(const QoiImage& image)
     };
 
     return {
-        .image = { encoded, qoipp_desc },
+        .image = { decoded, qoipp_desc },
         .time  = duration,
     };
 }
 
 EncodeResult<> qoipp_encode(const RawImage& image)
 {
-    auto timepoint = Clock::now();
+    auto buffer = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
 
-    auto buffer            = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
-    auto [count, complete] = qoipp::encode_into(buffer, image.data, image.desc).value();
-    if (not complete) {
-        throw std::runtime_error{ "encode incomplete when it should have" };
-    }
-    buffer.resize(count);
-
-    auto duration = Clock::now() - timepoint;
+    auto [_, duration] = timer::time_ns([&] {
+        auto [count, complete] = qoipp::encode_into(buffer, image.data, image.desc).value();
+        if (not complete) {
+            throw std::runtime_error{ "encode incomplete when it should have" };
+        }
+        buffer.resize(count);
+    });
 
     return {
         .image = { std::move(buffer), image.desc },
@@ -482,30 +462,29 @@ EncodeResult<> qoipp_encode(const RawImage& image)
 
 EncodeResult<> qoipp_stream_encode(const RawImage& image)
 {
-    auto timepoint = Clock::now();
+    auto buffer = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
 
-    auto encoder = qoipp::StreamEncoder{};
-    auto buffer  = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
+    auto [_, duration] = timer::time_ns([&] {
+        auto encoder = qoipp::StreamEncoder{};
 
-    if (not encoder.initialize(buffer, image.desc)) {
-        throw std::runtime_error{ "failed to initialize encoder" };
-    }
+        if (not encoder.initialize(buffer, image.desc)) {
+            throw std::runtime_error{ "failed to initialize encoder" };
+        }
 
-    auto off = qoipp::constants::header_size;
-    auto out = qoipp::ByteSpan{ buffer.data() + off, buffer.size() - off };
+        auto off = qoipp::constants::header_size;
+        auto out = qoipp::ByteSpan{ buffer.data() + off, buffer.size() - off };
 
-    auto res = encoder.encode(out, image.data);
-    assert(res.has_value());
+        auto res = encoder.encode(out, image.data);
+        assert(res.has_value());
 
-    auto size       = res->written;
-    auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
-    buffer.resize(off + size + additional);
+        auto size       = res->written;
+        auto additional = qoipp::constants::end_marker_size + encoder.has_run_count();
+        buffer.resize(off + size + additional);
 
-    if (not encoder.finalize({ buffer.data() + off + size, additional })) {
-        throw std::runtime_error{ "failed to finalize encoder" };
-    }
-
-    auto duration = Clock::now() - timepoint;
+        if (not encoder.finalize({ buffer.data() + off + size, additional })) {
+            throw std::runtime_error{ "failed to finalize encoder" };
+        }
+    });
 
     return {
         .image = { std::move(buffer), image.desc },
@@ -515,73 +494,76 @@ EncodeResult<> qoipp_stream_encode(const RawImage& image)
 
 DecodeResult qoipp_decode(const QoiImage& image)
 {
-    auto timepoint   = Clock::now();
-    auto desc        = qoipp::read_header(image.data).value();
-    auto buffer_size = desc.width * desc.height * static_cast<std::size_t>(desc.channels);
-    auto buffer      = qoipp::ByteVec(buffer_size);
-    auto _           = qoipp::decode_into(buffer, image.data).value();
-    auto duration    = Clock::now() - timepoint;
+    auto [buffer, duration] = timer::time_ns([&] {
+        auto buffer = qoipp::ByteVec(qoipp::worst_size(image.desc).value());
+        auto res    = qoipp::decode_into(buffer, image.data);
+        if (not res or *res != image.desc) {
+            throw std::runtime_error{ "decode failed or mismatched desc" };
+        }
+        return buffer;
+    });
 
     return {
-        .image = { std::move(buffer), desc },
+        .image = { std::move(buffer), image.desc },
         .time  = duration,
     };
 }
 
 DecodeResult qoipp_stream_decode(const QoiImage& image)
 {
-    auto timepoint = Clock::now();
+    auto [buffer, duration] = timer::time_ns([&] {
+        auto decoder = qoipp::StreamDecoder{};
+        auto buffer  = qoipp::ByteVec(qoipp::count_bytes(image.desc).value());
 
-    auto decoder = qoipp::StreamDecoder{};
-    auto buffer  = qoipp::ByteVec(qoipp::count_bytes(image.desc).value());
+        auto desc = decoder.initialize({ image.data.data(), qoipp::constants::header_size });
+        if (not desc or *desc != image.desc) {
+            throw std::runtime_error{ "decode failed or mismatched desc" };
+        }
 
-    auto desc = decoder.initialize({ image.data.data(), qoipp::constants::header_size }).value();
+        auto off = qoipp::constants::header_size;
+        auto end = image.data.size() - qoipp::constants::end_marker_size - off;
 
-    auto off = qoipp::constants::header_size;
-    auto end = image.data.size() - qoipp::constants::end_marker_size - off;
+        auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), end) };
+        auto res = decoder.decode(buffer, in);
+        assert(res.has_value());
 
-    auto in  = qoipp::ByteCSpan{ image.data.data() + off, std::min(buffer.size(), end) };
-    auto res = decoder.decode(buffer, in);
-    assert(res.has_value());
+        auto write = res->written;
+        while (decoder.has_run_count()) {
+            auto out   = qoipp::ByteSpan{ buffer.begin() + static_cast<std::ptrdiff_t>(write), buffer.end() };
+            auto count = decoder.drain_run(out).value();
+            write += count;
+        }
 
-    auto write = res->written;
-    while (decoder.has_run_count()) {
-        auto out    = qoipp::ByteSpan{ buffer.begin() + write, buffer.end() };
-        auto count  = decoder.drain_run(out).value();
-        write      += count;
-    }
-
-    decoder.reset();
-
-    auto duration = Clock::now() - timepoint;
+        decoder.reset();
+        return buffer;
+    });
 
     return {
-        .image = { std::move(buffer), desc },
+        .image = { std::move(buffer), image.desc },
         .time  = duration,
     };
 }
 
 EncodeResult<PngImage> stb_encode(const RawImage& image)
 {
-    auto timepoint = Clock::now();
-    auto len       = 0;
+    auto len = 0;
 
-    auto&& [data, desc] = image;
-    auto encoded        = stbi_write_png_to_mem(
-        reinterpret_cast<const unsigned char*>(data.data()),
-        0,
-        static_cast<int>(desc.width),
-        static_cast<int>(desc.height),
-        static_cast<int>(desc.channels),
-        &len
-    );
-
-    auto duration = Clock::now() - timepoint;
+    auto [encoded, duration] = timer::time_ns([&] {
+        const auto& [data, desc] = image;
+        return stbi_write_png_to_mem(
+            reinterpret_cast<const unsigned char*>(data.data()),
+            0,
+            static_cast<int>(desc.width),
+            static_cast<int>(desc.height),
+            static_cast<int>(desc.channels),
+            &len
+        );
+    });
 
     auto result = EncodeResult<PngImage>{
         .image = {
             .data = { encoded, encoded + len },
-            .desc = desc,
+            .desc = image.desc,
         },
         .time = duration,
     };
@@ -592,19 +574,20 @@ EncodeResult<PngImage> stb_encode(const RawImage& image)
 
 DecodeResult stb_decode(const PngImage& image)
 {
-    auto timepoint = Clock::now();
-    int  width, height, channels;
-    auto data = stbi_load_from_memory(
-        reinterpret_cast<const unsigned char*>(image.data.data()),
-        static_cast<int>(image.data.size()),
-        &width,
-        &height,
-        &channels,
-        0
-    );
+    int width, height, channels;
 
-    auto duration = Clock::now() - timepoint;
-    auto size     = static_cast<size_t>(width * height * channels);
+    auto [data, duration] = timer::time_ns([&] {
+        return stbi_load_from_memory(
+            reinterpret_cast<const unsigned char*>(image.data.data()),
+            static_cast<int>(image.data.size()),
+            &width,
+            &height,
+            &channels,
+            0
+        );
+    });
+
+    auto size = static_cast<size_t>(width * height * channels);
 
     auto channels_real = qoipp::to_channels(channels);
     if (not channels_real) {
@@ -632,11 +615,11 @@ EncodeResult<PngImage> fpng_encode(const RawImage& image)
 {
     auto& [data, desc] = image;
     auto chan          = static_cast<unsigned int>(desc.channels);
+    auto encoded       = std::vector<std::uint8_t>{};
 
-    auto timepoint = Clock::now();
-    auto encoded   = std::vector<std::uint8_t>{};
-    auto success   = fpng::fpng_encode_image_to_memory(data.data(), desc.width, desc.height, chan, encoded);
-    auto duration  = Clock::now() - timepoint;
+    auto [success, duration] = timer::time_ns([&] {
+        return fpng::fpng_encode_image_to_memory(data.data(), desc.width, desc.height, chan, encoded);
+    });
 
     if (not success) {
         throw std::runtime_error{ "Error encoding image (fpng)" };
@@ -655,25 +638,25 @@ DecodeResult fpng_decode(const PngImage& image)
 {
     auto& [data, desc] = image;
 
-    auto timepoint = Clock::now();
-
     auto         decoded = std::vector<std::uint8_t>{};
     unsigned int width, height, channels;
-    auto         success = fpng::fpng_decode_memory(
-        data.data(),
-        static_cast<unsigned int>(data.size()),
-        decoded,
-        width,
-        height,
-        channels,
-        static_cast<unsigned int>(desc.channels)
-    );
 
-    auto duration = Clock::now() - timepoint;
+    auto [success, duration] = timer::time_ns([&] {
+        return fpng::fpng_decode_memory(
+            data.data(),
+            static_cast<unsigned int>(data.size()),
+            decoded,
+            width,
+            height,
+            channels,
+            static_cast<unsigned int>(desc.channels)
+        );
+    });
 
     if (success != fpng::FPNG_DECODE_SUCCESS) {
         throw std::runtime_error{ "Error decoding image (fpng)" };
     }
+
     auto channels_real = qoipp::to_channels(channels);
     if (not channels_real) {
         throw std::runtime_error{ fmt::format("Number of channels ({}) is not supported (fpng)", channels) };
